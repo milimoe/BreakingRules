@@ -1,0 +1,13 @@
+# Godot 4 import/cache (regenerated on open)
+.godot/
+
+# Visual Studio / JetBrains cache
+.vs/
+.idea/
+
+# Build output
+bin/
+obj/
+
+# Agent / workbuddy memory (internal, not part of the game)
+.workbuddy/

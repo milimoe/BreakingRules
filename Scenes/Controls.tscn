@@ -1,0 +1,56 @@
+[gd_scene format=3]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_1"]
+bg_color = Color(0.2, 0.22, 0.3, 0.4)
+border_color = Color(0.36, 0.45, 0.7, 0.9)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_left = 6
+corner_radius_bottom_right = 6
+content_margin_left = 10
+content_margin_top = 8
+content_margin_right = 10
+content_margin_bottom = 8
+
+[node name="Controls" type="PanelContainer"]
+anchors_preset = 1
+anchor_left = 1.0
+anchor_top = 0.0
+anchor_right = 1.0
+anchor_bottom = 0.0
+offset_left = -300.0
+offset_top = 12.0
+offset_right = -12.0
+offset_bottom = 212.0
+theme_override_styles/panel = SubResource("StyleBoxFlat_1")
+
+[node name="VBox" type="VBoxContainer" parent="."]
+theme_override_constants/separation = 6
+
+[node name="Title" type="Label" parent="VBox"]
+theme_override_font_sizes/font_size = 16
+text = "操作说明"
+
+[node name="Move" type="Label" parent="VBox"]
+text = "移动：A / D"
+
+[node name="Jump" type="Label" parent="VBox"]
+text = "跳跃：W / ↑"
+
+[node name="Attack" type="Label" parent="VBox"]
+text = "攻击 Boss：J / 空格"
+
+[node name="Strike" type="Label" parent="VBox"]
+text = "划除条文（耗墨）：Q"
+
+[node name="Skill" type="Label" parent="VBox"]
+text = "技能：1 毁灭直线 / 2 八向射线"
+
+[node name="Meta" type="Label" parent="VBox"]
+modulate = Color(0.7, 0.7, 0.75, 0.8)
+autowrap_mode = 1
+text = "本游戏的操作说明也是规则，但你不需要遵守它们。"

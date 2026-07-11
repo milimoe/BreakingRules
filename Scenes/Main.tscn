@@ -1,0 +1,99 @@
+[gd_scene format=3 uid="uid://dsj3tu3bok21s"]
+
+[ext_resource type="Script" path="res://Scripts/LevelDirector.cs" id="1"]
+[ext_resource type="PackedScene" uid="uid://djpoj5c12t7jk" path="res://Scenes/Player.tscn" id="2"]
+[ext_resource type="PackedScene" path="res://Scenes/Boss.tscn" id="3"]
+[ext_resource type="PackedScene" uid="uid://bqkqxnah1jv88" path="res://Scenes/Hud.tscn" id="4"]
+[ext_resource type="PackedScene" path="res://Scenes/Controls.tscn" id="5"]
+[ext_resource type="Script" path="res://Scripts/Pickup.cs" id="6"]
+
+[sub_resource type="RectangleShape2D" id="GroundShape"]
+size = Vector2(960, 40)
+
+[sub_resource type="RectangleShape2D" id="PlatShape"]
+size = Vector2(160, 22)
+
+[node name="World" type="Node2D"]
+
+[node name="LevelDirector" type="Node2D" parent="."]
+script = ExtResource("1")
+
+[node name="Ground" type="StaticBody2D" parent="."]
+position = Vector2(480, 520)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Ground"]
+shape = SubResource("GroundShape")
+
+[node name="Sprite" type="Sprite2D" parent="Ground"]
+
+[node name="PlatformA" type="StaticBody2D" parent="."]
+position = Vector2(180, 410)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="PlatformA"]
+shape = SubResource("PlatShape")
+
+[node name="Sprite" type="Sprite2D" parent="PlatformA"]
+
+[node name="PlatformB" type="StaticBody2D" parent="."]
+position = Vector2(380, 330)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="PlatformB"]
+shape = SubResource("PlatShape")
+
+[node name="Sprite" type="Sprite2D" parent="PlatformB"]
+
+[node name="PlatformC" type="StaticBody2D" parent="."]
+position = Vector2(580, 410)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="PlatformC"]
+shape = SubResource("PlatShape")
+
+[node name="Sprite" type="Sprite2D" parent="PlatformC"]
+
+[node name="PlatformD" type="StaticBody2D" parent="."]
+position = Vector2(760, 330)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="PlatformD"]
+shape = SubResource("PlatShape")
+
+[node name="Sprite" type="Sprite2D" parent="PlatformD"]
+
+[node name="PlatformE" type="StaticBody2D" parent="."]
+position = Vector2(480, 250)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="PlatformE"]
+shape = SubResource("PlatShape")
+
+[node name="Sprite" type="Sprite2D" parent="PlatformE"]
+
+[node name="PickupSpeed" type="Area2D" parent="."]
+position = Vector2(480, 472)
+script = ExtResource("6")
+Kind = "Speed"
+
+[node name="PickupJump" type="Area2D" parent="."]
+position = Vector2(380, 306)
+script = ExtResource("6")
+Kind = "Jump"
+
+[node name="PickupHeal" type="Area2D" parent="."]
+position = Vector2(580, 386)
+script = ExtResource("6")
+Kind = "Heal"
+
+[node name="PickupSpeedHigh" type="Area2D" parent="."]
+position = Vector2(480, 226)
+script = ExtResource("6")
+Kind = "Speed"
+
+[node name="Player" parent="." instance=ExtResource("2")]
+position = Vector2(120, 460)
+
+[node name="Boss" parent="." instance=ExtResource("3")]
+position = Vector2(820, 300)
+
+[node name="HudLayer" type="CanvasLayer" parent="."]
+
+[node name="Hud" parent="HudLayer" instance=ExtResource("4")]
+
+[node name="Controls" parent="HudLayer" instance=ExtResource("5")]

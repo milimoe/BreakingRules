@@ -1,0 +1,19 @@
+﻿Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 2012
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Breaking Rules", "Breaking Rules.csproj", "{DEE93EFB-C9B2-44C8-8033-2B35221C1F0E}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+	Debug|Any CPU = Debug|Any CPU
+	ExportDebug|Any CPU = ExportDebug|Any CPU
+	ExportRelease|Any CPU = ExportRelease|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{DEE93EFB-C9B2-44C8-8033-2B35221C1F0E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DEE93EFB-C9B2-44C8-8033-2B35221C1F0E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DEE93EFB-C9B2-44C8-8033-2B35221C1F0E}.ExportDebug|Any CPU.ActiveCfg = ExportDebug|Any CPU
+		{DEE93EFB-C9B2-44C8-8033-2B35221C1F0E}.ExportDebug|Any CPU.Build.0 = ExportDebug|Any CPU
+		{DEE93EFB-C9B2-44C8-8033-2B35221C1F0E}.ExportRelease|Any CPU.ActiveCfg = ExportRelease|Any CPU
+		{DEE93EFB-C9B2-44C8-8033-2B35221C1F0E}.ExportRelease|Any CPU.Build.0 = ExportRelease|Any CPU
+	EndGlobalSection
+EndGlobal

@@ -32,6 +32,7 @@ public partial class RuleObject : Node2D
     private Sprite2D _band;
     private Sprite2D _zoneVisual;
     private Vector2 _zoneOffset;
+    private Tween _bobTween;   // 飘动 tween（无限循环）；划除后须先 Kill 再释放目标节点
 
     public override void _Ready()
     {
@@ -61,11 +62,13 @@ public partial class RuleObject : Node2D
         _zoneVisual.Position = _zoneOffset;
         AddChild(_zoneVisual);
 
-        // 上下飘动
-        var bob = CreateTween();
-        bob.SetLoops(-1);
-        bob.TweenProperty(_bandRoot, "position:y", 8f, 1.1f).From(-8f);
-        bob.TweenProperty(_bandRoot, "position:y", -8f, 1.1f);
+        // 上下飘动（无限循环）。注意：本节点被划除时会释放 _bandRoot，
+        // 必须在释放前 Kill 此 tween，否则无限循环 tween 的目标失效后
+        // total_time==0 + loops==-1 触发 Godot "Infinite loop detected"。
+        _bobTween = CreateTween();
+        _bobTween.SetLoops(-1);
+        _bobTween.TweenProperty(_bandRoot, "position:y", 8f, 1.1f).From(-8f);
+        _bobTween.TweenProperty(_bandRoot, "position:y", -8f, 1.1f);
     }
 
     /// <summary>按规则类型给出条文文本与区域颜色（半透明）。</summary>
@@ -95,6 +98,10 @@ public partial class RuleObject : Node2D
     /// <summary>被划除：反转成超级弹簧，白条淡出，保留弹簧区 8 秒后自毁。</summary>
     public void ApplyStrike()
     {
+        // 先停掉无限飘动 tween，避免其目标 _bandRoot 被释放后触发 "Infinite loop detected"
+        _bobTween?.Kill();
+        _bobTween = null;
+
         Mode = RuleMode.Spring;
         _zoneVisual.Modulate = new Color(1f, 0.85f, 0.2f, 0.45f); // 黄
 

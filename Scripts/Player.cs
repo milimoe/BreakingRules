@@ -211,17 +211,20 @@ public partial class Player : CharacterBody2D
         frames.SetAnimationSpeed("attack", AttackFps);
         frames.SetAnimationLoopMode("attack", SpriteFrames.LoopMode.None);
         _sprite.SpriteFrames = frames;
-        _sprite.Connect(AnimatedSprite2D.SignalName.AnimationFinished, Callable.From<StringName>(OnAnimFinished));
+        // 注意：本 Godot 4.7 构建下 animation_finished 信号实际以 0 参数发出，
+        // 故用 0 参数回调（攻击动画为唯一非循环动画，结束后复位即可）。
+        _sprite.Connect(AnimatedSprite2D.SignalName.AnimationFinished, Callable.From(OnAnimFinished));
         _sprite.Play("run");
     }
 
     private static Texture2D LoadFrame(int i) =>
         GD.Load<Texture2D>($"res://Assets/PNG/Players/Tiles/tile_{i:D4}.png");
 
-    private void OnAnimFinished(StringName anim)
+    private void OnAnimFinished()
     {
-        if (anim != "attack") return;
-        _attacking = false; // 复位后由 _PhysicsProcess 的 UpdateAnim 决定下一状态
+        // 仅 "attack"（唯一非循环动画）会触发 animation_finished；复位后
+        // 由 _PhysicsProcess 的 UpdateAnim 决定下一帧是跑/站 状态。
+        _attacking = false;
     }
 
     /// <summary>根据移动输入切换 跑/站 动画与朝向；攻击动画进行中时让位。</summary>

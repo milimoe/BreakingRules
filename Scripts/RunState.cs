@@ -7,24 +7,74 @@ public partial class RunState : Node
 {
     public static RunState Instance { get; private set; }
 
+    // 单次场景内的「姿态」计数（每次（重）载入场景复位）
     public int ObeyCount { get; private set; }
     public int ExploitCount { get; private set; }
     public int BreakCount { get; private set; }
     public int StrikeCount { get; private set; }
 
+    // 一局之内跨场景保留（下一关时不清零；重新开始才清零）
+    public int ClearCount { get; private set; }
+    public int CurrentStage { get; set; }
+
+    // 历史最高通关数（持久化到 user://，跨应用启动保留）
+    public int BestClearCount { get; private set; }
+
+    private const string SavePath = "user://breaking_rules.save";
+
     public override void _EnterTree()
     {
         Instance = this;
+        LoadBest();
         base._EnterTree();
     }
 
-    // 重开场景时复位累计计数（Autoload 跨场景存活）
+    /// <summary>每次（重）载入场景时复位「姿态」计数。通关数/当前关/历史最高不在此清零（跨场景保留）。</summary>
     public void Reset()
     {
         ObeyCount = 0;
         ExploitCount = 0;
         BreakCount = 0;
         StrikeCount = 0;
+    }
+
+    /// <summary>从头开始一局：通关数与当前关归零。历史最高保留。</summary>
+    public void StartNewRun()
+    {
+        ClearCount = 0;
+        CurrentStage = 0;
+    }
+
+    /// <summary>击败一个 BOSS：通关数 +1；若刷新纪录则立即落盘。</summary>
+    public void RecordClear()
+    {
+        ClearCount++;
+        if (ClearCount > BestClearCount)
+        {
+            BestClearCount = ClearCount;
+            SaveBest();
+        }
+    }
+
+    private void SaveBest()
+    {
+        using var f = FileAccess.Open(SavePath, FileAccess.ModeFlags.Write);
+        if (f == null) return;
+        var d = new Godot.Collections.Dictionary { { "best", BestClearCount } };
+        f.StoreString(Json.Stringify(d));
+    }
+
+    private void LoadBest()
+    {
+        if (!FileAccess.FileExists(SavePath)) return;
+        using var f = FileAccess.Open(SavePath, FileAccess.ModeFlags.Read);
+        if (f == null) return;
+        var v = Json.ParseString(f.GetAsText());
+        if (v.VariantType == Variant.Type.Dictionary)
+        {
+            var d = (Godot.Collections.Dictionary)v;
+            if (d.ContainsKey("best")) BestClearCount = (int)d["best"];
+        }
     }
 
     public void RecordObey() => ObeyCount++;

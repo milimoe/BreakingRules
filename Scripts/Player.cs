@@ -10,23 +10,27 @@ public partial class Player : CharacterBody2D
     [Export] public float JumpVelocity { get; set; } = -600f;
     [Export] public float Gravity { get; set; } = 1100f;
     [Export] public int MaxHp { get; set; } = 5;
-    [Export] public int Ink { get; set; } = 100;          // 当前墨量（同时是上限）
-    [Export] public float InkRegen { get; set; } = 10f;   // 每秒回复（真空期×2）
-    [Export] public int StrikeCost { get; set; } = 30;    // 划除一条条文消耗
     [Export] public float AttackPower { get; set; } = 1f;
     [Export] public float AttackCooldown { get; set; } = 0.32f;
 
     [Signal] public delegate void HealthChangedEventHandler(int hp, int maxHp);
-    [Signal] public delegate void InkChangedEventHandler(int ink, int maxInk);
     [Signal] public delegate void DiedEventHandler();
 
     // 角色基准缩放（开局即小；攻击挥动也以此为准，避免挥砍后角色被缩水）
     private const float BaseScale = 1.5f;
 
+    // 玩家动画帧（Players/Tiles/tile_0000~0007 共 8 张，均为同一角色）。
+    // 帧区间集中在此：若后续确认哪些帧是走、哪些是攻击，只改这里即可。
+    private const int RunFrom = 0, RunTo = 7;   // 移动（循环）
+    private const int AtkFrom = 0, AtkTo = 7;   // 攻击（单次、稍快）
+    private const int RunFps = 10;
+    private const int AttackFps = 18;
+
     // 技能系统
-    private float _cd1, _cd2;
+    private float _cd1, _cd2, _qCd;
     private const float Cd1 = 10f;   // 技能1（毁灭直线）冷却
     private const float Cd2 = 8f;    // 技能2（八向射线）冷却
+    private const float QCd = 5f;    // 划除技能（Q 键）：5 秒冷却、无次数限制
     private const float Skill1Damage = 5f;
     private const float Skill2Damage = 4f;
     private const float Skill1Band = 40f;    // 直线命中：与 Boss 同平面的纵向容差
@@ -34,13 +38,12 @@ public partial class Player : CharacterBody2D
     public int SkillPoints { get; private set; }
     public const int SkillCount = 2;
 
-    private Sprite2D _sprite;
+    private AnimatedSprite2D _sprite;
     private Camera2D _camera;
+    private bool _attacking;
     private int _hp;
-    private float _ink;
     private float _invuln;
     private float _attackCd;
-    private int _lastInkShown = -1;
 
     // 地图拾取物增益（临时）
     private float _speedBuff = 1f;   // 速度倍率
@@ -53,9 +56,8 @@ public partial class Player : CharacterBody2D
     public override void _Ready()
     {
         _hp = MaxHp;
-        _ink = Ink;
-        _sprite = GetNode<Sprite2D>("Sprite");
-        _sprite.Texture = GD.Load<Texture2D>("res://Assets/PNG/Players/Tiles/tile_0000.png");
+        _sprite = GetNode<AnimatedSprite2D>("Sprite");
+        SetupPlayerAnimation();
         _sprite.Scale = new Vector2(BaseScale, BaseScale);
         _camera = GetNode<Camera2D>("Camera2D");
         // 单屏竞技场：把相机限位框设为整个 960x540 场地。
@@ -160,6 +162,7 @@ public partial class Player : CharacterBody2D
         // 技能（数字键 1 / 2）：CD 制。空格同时触发跳+攻击，故技能独立键避免误触。
         _cd1 = Mathf.Max(0f, _cd1 - d);
         _cd2 = Mathf.Max(0f, _cd2 - d);
+        _qCd = Mathf.Max(0f, _qCd - d); // 划除技能（Q）冷却倒计时
         if (Input.IsActionJustPressed("skill1") && _cd1 <= 0f) CastSkill1();
         if (Input.IsActionJustPressed("skill2") && _cd2 <= 0f) CastSkill2();
 
@@ -174,17 +177,15 @@ public partial class Player : CharacterBody2D
             Mathf.Clamp(Position.Y, 0f, 504f)
         );
 
-        // 墨回复（真空期×2）
-        if (_ink < Ink)
-        {
-            float regen = InkRegen * (RuleManager.Instance != null ? RuleManager.Instance.InkRegenMult : 1f);
-            _ink = Mathf.Min(Ink, _ink + regen * d);
-            EmitInkIfChanged();
-        }
+        UpdateAnim(dir);
     }
 
     private void Swing()
     {
+        // 触发攻击动画（单次、稍快）；结束由 OnAnimFinished 复位
+        _attacking = true;
+        _sprite.Play("attack");
+
         var tween = CreateTween();
         tween.TweenProperty(_sprite, "scale", Vector2.One * BaseScale * 1.4f, 0.08f).From(Vector2.One * BaseScale);
         tween.TweenProperty(_sprite, "scale", Vector2.One * BaseScale, 0.08f);
@@ -195,10 +196,54 @@ public partial class Player : CharacterBody2D
                 b.TakeDamage((int)Mathf.Round(dmg));
     }
 
+    /// <summary>用 Players/Tiles/tile_0000~0007 八张同角色图构建 SpriteFrames：
+    /// "run"（移动，循环）与 "attack"（攻击，单次、稍快）。帧区间集中在常量，便于重映射。</summary>
+    private void SetupPlayerAnimation()
+    {
+        var frames = new SpriteFrames();
+        if (frames.HasAnimation("default")) frames.RemoveAnimation("default");
+        frames.AddAnimation("run");
+        frames.AddAnimation("attack");
+        for (int i = RunFrom; i <= RunTo; i++) frames.AddFrame("run", LoadFrame(i));
+        for (int i = AtkFrom; i <= AtkTo; i++) frames.AddFrame("attack", LoadFrame(i));
+        frames.SetAnimationSpeed("run", RunFps);
+        frames.SetAnimationLoopMode("run", SpriteFrames.LoopMode.Linear);
+        frames.SetAnimationSpeed("attack", AttackFps);
+        frames.SetAnimationLoopMode("attack", SpriteFrames.LoopMode.None);
+        _sprite.SpriteFrames = frames;
+        _sprite.Connect(AnimatedSprite2D.SignalName.AnimationFinished, Callable.From<StringName>(OnAnimFinished));
+        _sprite.Play("run");
+    }
+
+    private static Texture2D LoadFrame(int i) =>
+        GD.Load<Texture2D>($"res://Assets/PNG/Players/Tiles/tile_{i:D4}.png");
+
+    private void OnAnimFinished(StringName anim)
+    {
+        if (anim != "attack") return;
+        _attacking = false; // 复位后由 _PhysicsProcess 的 UpdateAnim 决定下一状态
+    }
+
+    /// <summary>根据移动输入切换 跑/站 动画与朝向；攻击动画进行中时让位。</summary>
+    private void UpdateAnim(float dir)
+    {
+        if (_attacking) return;
+        if (Mathf.Abs(dir) > 0.01f)
+        {
+            if (_sprite.Animation != "run" || !_sprite.IsPlaying()) _sprite.Play("run");
+            if (dir != 0f) _sprite.FlipH = dir < 0f;
+        }
+        else
+        {
+            _sprite.Pause();
+            _sprite.Frame = 0; // 站立中立帧
+        }
+    }
+
     private void TryStrike()
     {
         if (RuleManager.Instance == null) return;
-        if (_ink < StrikeCost) { ShowPopup("墨不足", Colors.Gray); return; }
+        if (_qCd > 0f) { ShowPopup("冷却中", Colors.Gray); return; }
 
         // 禁改区：区内按 Q 划除 = 违规（可从区外边缘划掉该区本身）
         bool inNoStrike = RuleManager.Instance.ActiveRules.Any(r => IsInstanceValid(r) &&
@@ -224,8 +269,7 @@ public partial class Player : CharacterBody2D
         }
         if (nearest == null) return;
 
-        _ink -= StrikeCost;
-        EmitInkIfChanged();
+        _qCd = QCd; // 进入 5 秒冷却（无次数限制）
         // 红色划痕瞬间
         var slash = CreateTween();
         slash.TweenProperty(_sprite, "modulate", Colors.Red, 0.06f);
@@ -239,6 +283,11 @@ public partial class Player : CharacterBody2D
     public bool IsSkillReady(int i) => i == 1 ? _cd1 <= 0f : _cd2 <= 0f;
     public float SkillCd(int i) => i == 1 ? _cd1 : _cd2;
     public float SkillCdMax(int i) => i == 1 ? Cd1 : Cd2;
+
+    // 划除技能（Q 键）：5 秒冷却、无次数限制
+    public bool IsQReady => _qCd <= 0f;
+    public float QSkillCd => _qCd;
+    public float QSkillCdMax => QCd;
 
     /// <summary>技能1：在角色所在水平面释放一条贯穿全屏的毁灭直线，命中同平面 Boss。</summary>
     private void CastSkill1()
@@ -310,18 +359,8 @@ public partial class Player : CharacterBody2D
         }
     }
 
-    /// <summary>捡起技能宝珠后调用：技能点 +1（HUD 在生命值下方显示）。</summary>
+    /// <summary>捡起技能宝珠后调用：技能点 +1（HUD 技能条显示）。</summary>
     public void AddSkillPoint() => SkillPoints++;
-
-    private void EmitInkIfChanged()
-    {
-        int v = (int)Mathf.Round(_ink);
-        if (v != _lastInkShown)
-        {
-            _lastInkShown = v;
-            EmitSignal(SignalName.InkChanged, v, Ink);
-        }
-    }
 
     public void TakeDamage(int amount)
     {

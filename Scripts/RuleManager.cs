@@ -20,7 +20,6 @@ public partial class RuleManager : Node
     [Export] public int MaxActiveRules { get; set; } = 3;
     [Export] public float AttackMultVacuum { get; set; } = 3f;
     [Export] public float SpeedMultVacuum { get; set; } = 2f;
-    [Export] public float InkRegenMultVacuum { get; set; } = 2f;
 
     private readonly List<RuleObject> _active = new();
     private float _vacuumRemaining;
@@ -76,7 +75,6 @@ public partial class RuleManager : Node
 
     public float AttackMult => _isVacuum ? AttackMultVacuum : 1f;
     public float SpeedMult => _isVacuum ? SpeedMultVacuum : 1f;
-    public float InkRegenMult => _isVacuum ? InkRegenMultVacuum : 1f;
 
     /// <summary>Boss 调用：在 anchor 处生成一条指定类型的「规则条文」（场上已达上限则忽略）。</summary>
     public void SpawnRule(RuleMode mode, Vector2 anchor)
@@ -117,8 +115,13 @@ public partial class RuleManager : Node
 
     public override void _PhysicsProcess(double delta)
     {
+        // 树被暂停（胜负对话框弹出）或当前不在游戏主场景（标题界面）时，
+        // 彻底冻结：不生成技能宝珠，也不推进真空期倒计时。
+        // —— 修复「标题界面 / 游戏结束时道具还在一直刷新」。
+        if (GetTree().Paused || GetTree().GetFirstNodeInGroup("player") == null) return;
+
         float d = (float)delta;
-        // 随机掉落技能宝珠（树暂停时本节点也暂停，故暂停期间不生成）
+        // 随机掉落技能宝珠
         _dropTimer -= d;
         if (_dropTimer <= 0f)
         {

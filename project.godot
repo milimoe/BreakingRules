@@ -11,7 +11,7 @@ config_version=5
 [application]
 
 config/name="Breaking Rules"
-run/main_scene="res://Scenes/Main.tscn"
+run/main_scene="res://Scenes/Title.tscn"
 config/features=PackedStringArray("4.7", "C#", "Forward Plus")
 config/dotnet/namespace="BreakingRules"
 
@@ -24,6 +24,11 @@ RunState="*res://Scripts/RunState.cs"
 
 window/size/viewport_width=960
 window/size/viewport_height=540
+; 关键：启用 canvas_items 拉伸 —— 整个画布（含 2D 世界、HUD、标题、对话框）随窗口等比重缩放，
+; 而非把 960x540 内容钉死在左上角。aspect=keep 保持 16:9 不变形（窗口比例不符时出现黑边）。
+; 若希望铺满窗口不留黑边（可能露出场地外空白），可改 aspect="expand"。
+window/stretch/mode="canvas_items"
+window/stretch/aspect="keep"
 
 [dotnet]
 
@@ -86,3 +91,4 @@ skill2={
 [rendering]
 
 textures/canvas_textures/default_texture_filter=0
+textures/vram_compression/import_etc2_astc=true

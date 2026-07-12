@@ -2,7 +2,6 @@
 
 [ext_resource type="Script" path="res://Scripts/LevelDirector.cs" id="1"]
 [ext_resource type="PackedScene" uid="uid://djpoj5c12t7jk" path="res://Scenes/Player.tscn" id="2"]
-[ext_resource type="PackedScene" path="res://Scenes/Boss.tscn" id="3"]
 [ext_resource type="PackedScene" uid="uid://bqkqxnah1jv88" path="res://Scenes/Hud.tscn" id="4"]
 [ext_resource type="PackedScene" path="res://Scenes/Controls.tscn" id="5"]
 [ext_resource type="Script" path="res://Scripts/Pickup.cs" id="6"]
@@ -88,9 +87,6 @@ Kind = "Speed"
 
 [node name="Player" parent="." instance=ExtResource("2")]
 position = Vector2(120, 460)
-
-[node name="Boss" parent="." instance=ExtResource("3")]
-position = Vector2(820, 300)
 
 [node name="HudLayer" type="CanvasLayer" parent="."]
 

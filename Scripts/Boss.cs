@@ -17,12 +17,16 @@ public partial class Boss : CharacterBody2D
     [Export] public float MeleeDamage { get; set; } = 1f;
     [Export] public float MeleeCooldown { get; set; } = 1.2f;
     [Export] public float HoverSpeed { get; set; } = 40f;
+    [Export] public string BossName { get; set; } = "初审官";
+    [Export] public string TexturePath { get; set; } = "res://Assets/PNG/Enemies/Tiles/tile_0000.png";
+    [Export] public Color Tint { get; set; } = Colors.White;
 
     [Signal] public delegate void HealthChangedEventHandler(int hp, int maxHp);
     [Signal] public delegate void DiedEventHandler();
 
     private Sprite2D _sprite;
     private Player _target;
+    private Color _baseTint = Colors.White;
     private int _hp;
     private float _spawnTimer;
     private float _chargeTimer;
@@ -54,8 +58,10 @@ public partial class Boss : CharacterBody2D
     {
         _hp = MaxHp;
         _sprite = new Sprite2D();
-        _sprite.Texture = GD.Load<Texture2D>("res://Assets/PNG/Enemies/Tiles/tile_0000.png");
+        _sprite.Texture = GD.Load<Texture2D>(TexturePath);
         _sprite.Scale = new Vector2(2f, 2f);
+        _baseTint = Tint;
+        _sprite.Modulate = _baseTint;
         AddChild(_sprite);
         AddToGroup("boss");
 
@@ -144,10 +150,10 @@ public partial class Boss : CharacterBody2D
         if (_hp <= 0) return;
         _hp -= amount;
         EmitSignal(SignalName.HealthChanged, _hp, MaxHp);
-        // 受击闪烁
+        // 受击闪烁（闪白后回到本 BOSS 的染色）
         var t = CreateTween();
         t.TweenProperty(_sprite, "modulate", Colors.White, 0.06f);
-        t.TweenProperty(_sprite, "modulate", new Color(1f, 0.4f, 0.4f), 0.06f);
+        t.TweenProperty(_sprite, "modulate", _baseTint, 0.06f);
         RuleManager.Instance?.PlaySFX("boss_hit");
         if (_hp <= 0)
             EmitSignal(SignalName.Died);

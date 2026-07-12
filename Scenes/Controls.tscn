@@ -45,7 +45,7 @@ text = "跳跃：W / ↑"
 text = "攻击 Boss：J / 空格"
 
 [node name="Strike" type="Label" parent="VBox"]
-text = "划除条文（耗墨）：Q"
+text = "划除条文（5秒冷却）：Q"
 
 [node name="Skill" type="Label" parent="VBox"]
 text = "技能：1 毁灭直线 / 2 八向射线"

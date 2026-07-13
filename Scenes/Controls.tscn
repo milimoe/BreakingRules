@@ -1,5 +1,7 @@
 [gd_scene format=3]
 
+[ext_resource type="Script" path="res://Scripts/Controls.cs" id="Script_1"]
+
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_1"]
 bg_color = Color(0.2, 0.22, 0.3, 0.4)
 border_color = Color(0.36, 0.45, 0.7, 0.9)
@@ -16,41 +18,92 @@ content_margin_top = 8
 content_margin_right = 10
 content_margin_bottom = 8
 
-[node name="Controls" type="PanelContainer"]
+[node name="Controls" type="Panel"]
 anchors_preset = 1
 anchor_left = 1.0
 anchor_top = 0.0
 anchor_right = 1.0
 anchor_bottom = 0.0
-offset_left = -300.0
+offset_left = -320.0
 offset_top = 12.0
 offset_right = -12.0
-offset_bottom = 212.0
+offset_bottom = 312.0
 theme_override_styles/panel = SubResource("StyleBoxFlat_1")
+script = ExtResource("Script_1")
 
 [node name="VBox" type="VBoxContainer" parent="."]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_right = 0.0
+offset_bottom = 0.0
 theme_override_constants/separation = 6
 
-[node name="Title" type="Label" parent="VBox"]
+[node name="Header" type="HBoxContainer" parent="VBox"]
+layout_mode = 2
+size_flags_vertical = 0
+
+[node name="Title" type="Label" parent="VBox/Header"]
+layout_mode = 2
+size_flags_horizontal = 3
 theme_override_font_sizes/font_size = 16
 text = "操作说明"
 
-[node name="Move" type="Label" parent="VBox"]
+[node name="Toggle" type="Button" parent="VBox/Header"]
+layout_mode = 2
+size_flags_horizontal = 0
+custom_minimum_size = Vector2(64, 26)
+text = "收起 ▲"
+focus_mode = 0
+
+[node name="Content" type="VBoxContainer" parent="VBox"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="Move" type="Label" parent="VBox/Content"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
 text = "移动：A / D"
 
-[node name="Jump" type="Label" parent="VBox"]
+[node name="Jump" type="Label" parent="VBox/Content"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
 text = "跳跃：W / ↑"
 
-[node name="Attack" type="Label" parent="VBox"]
+[node name="Attack" type="Label" parent="VBox/Content"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
 text = "攻击 Boss：J / 空格"
 
-[node name="Strike" type="Label" parent="VBox"]
+[node name="Strike" type="Label" parent="VBox/Content"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
 text = "划除条文（5秒冷却）：Q"
 
-[node name="Skill" type="Label" parent="VBox"]
+[node name="Guard" type="Label" parent="VBox/Content"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+autowrap_mode = 1
+text = "防御（按住 S，完全抵挡 BOSS 伤害；防御中不可移动/攻击）"
+
+[node name="Skill" type="Label" parent="VBox/Content"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
 text = "技能：1 毁灭直线 / 2 八向射线"
 
-[node name="Meta" type="Label" parent="VBox"]
+[node name="Skill3" type="Label" parent="VBox/Content"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "护盾：3 青色护盾（3秒无敌，可挡投技）"
+
+[node name="Skill4" type="Label" parent="VBox/Content"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "治愈：4 自我治愈（+2 HP）"
+
+[node name="Meta" type="Label" parent="VBox/Content"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
 modulate = Color(0.7, 0.7, 0.75, 0.8)
 autowrap_mode = 1
 text = "本游戏的操作说明也是规则，但你不需要遵守它们。"

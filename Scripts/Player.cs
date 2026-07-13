@@ -27,19 +27,26 @@ public partial class Player : CharacterBody2D
     private const int AttackFps = 18;
 
     // 技能系统
-    private float _cd1, _cd2, _qCd;
+    private float _cd1, _cd2, _cd3, _cd4, _qCd;
     private const float Cd1 = 10f;   // 技能1（毁灭直线）冷却
     private const float Cd2 = 8f;    // 技能2（八向射线）冷却
+    private const float Cd3 = 14f;   // 技能3（青色护盾）冷却
+    private const float Cd4 = 18f;   // 技能4（自我治愈）冷却
+    private const float ShieldDur = 3f;  // 青色护盾无敌时长
     private const float QCd = 5f;    // 划除技能（Q 键）：5 秒冷却、无次数限制
-    private const float Skill1Damage = 5f;
-    private const float Skill2Damage = 4f;
+    private const float Skill1Damage = 4f;   // 技能1 伤害（略降）
+    private const float Skill2Damage = 3f;   // 技能2 伤害（略降）
     private const float Skill1Band = 40f;    // 直线命中：与 Boss 同平面的纵向容差
     private const float Skill2Range = 320f;  // 射线命中：以角色为中心的半径
     public int SkillPoints { get; private set; }
-    public const int SkillCount = 2;
+    public const int SkillCount = 4;
 
     private AnimatedSprite2D _sprite;
     private Camera2D _camera;
+    private Sprite2D _shield;   // 防御护盾（按 S 显示），独立子节点避免与 modulate 闪烁冲突
+    private Sprite2D _shield3;   // 青色护盾（技能3）：3秒无敌，独立子节点避免与 modulate 闪烁冲突
+    private float _shieldTimer;  // 青色护盾剩余无敌时间
+    private bool _frozen;        // 投技窒息期间冻结输入/物理（非树暂停，滤镜动画照常）
     private bool _attacking;
     private int _hp;
     private float _invuln;
@@ -59,6 +66,19 @@ public partial class Player : CharacterBody2D
         _sprite = GetNode<AnimatedSprite2D>("Sprite");
         SetupPlayerAnimation();
         _sprite.Scale = new Vector2(BaseScale, BaseScale);
+        // 防御护盾：按 S 时显示；用独立子节点(白方块+蓝色半透明)避免触碰 _sprite.Modulate
+        //（受击闪烁/攻击红闪都改 modulate，护盾独立显示不会互相打架）。
+        _shield = new Sprite2D();
+        _shield.Texture = Util.Square(46, 46, Colors.White);
+        _shield.Modulate = new Color(0.4f, 0.7f, 1f, 0.35f);
+        _shield.Visible = false;
+        AddChild(_shield);
+        // 青色护盾（技能3）：比防御护盾略大、青色，激活时显示
+        _shield3 = new Sprite2D();
+        _shield3.Texture = Util.Square(54, 54, Colors.White);
+        _shield3.Modulate = new Color(0.3f, 1f, 0.95f, 0.4f);
+        _shield3.Visible = false;
+        AddChild(_shield3);
         _camera = GetNode<Camera2D>("Camera2D");
         // 单屏竞技场：把相机限位框设为整个 960x540 场地。
         // 视口尺寸正好等于限位框 -> 相机被锁死、静止不滚动。
@@ -73,6 +93,7 @@ public partial class Player : CharacterBody2D
 
     public override void _PhysicsProcess(double delta)
     {
+        if (_frozen) return;   // 投技窒息冻结：暂停一切输入与物理；滤镜/计时由 BOSS 侧独立推进
         float d = (float)delta;
 
         // 增益倒计时
@@ -88,12 +109,16 @@ public partial class Player : CharacterBody2D
             if (_invuln <= 0f) _sprite.Modulate = Colors.White;
         }
 
+        // 防御护盾跟随显示（不依赖 _sprite.Modulate）
+        bool guarding = IsGuarding;
+        if (_shield != null) _shield.Visible = guarding;
+
         // 重力
         if (!IsOnFloor())
             Velocity = new Vector2(Velocity.X, Velocity.Y + Gravity * d);
 
-        // 水平移动（真空期×2，叠加拾取加速；限速区内移速大幅降低）
-        float dir = Input.GetAxis("move_left", "move_right");
+        // 水平移动（防御中禁止移动，把输入归零；真空期×2，叠加拾取加速；限速区内移速大幅降低）
+        float dir = guarding ? 0f : Input.GetAxis("move_left", "move_right");
         float spd = Speed * (RuleManager.Instance != null ? RuleManager.Instance.SpeedMult : 1f) * _speedBuff;
         if (RuleManager.Instance != null)
         {
@@ -114,8 +139,8 @@ public partial class Player : CharacterBody2D
             }
         }
 
-        // 跳跃 / 违规判定
-        if (Input.IsActionJustPressed("jump"))
+        // 跳跃 / 违规判定（防御中禁止起跳：防御=扎根，不能借跳位移）
+        if (Input.IsActionJustPressed("jump") && !guarding)
         {
             bool inNoJump = RuleManager.Instance != null &&
                 RuleManager.Instance.ActiveRules.Any(r => IsInstanceValid(r) &&
@@ -134,9 +159,9 @@ public partial class Player : CharacterBody2D
             }
         }
 
-        // 普攻（禁武区内攻击 = 违规）
+        // 普攻（禁武区内攻击 = 违规；防御中不可攻击，避免「站着格挡还能输出」的逃课）
         _attackCd -= d;
-        if (Input.IsActionPressed("attack") && _attackCd <= 0f)
+        if (Input.IsActionPressed("attack") && _attackCd <= 0f && !guarding)
         {
             _attackCd = AttackCooldown;
             bool inNoAttack = RuleManager.Instance != null &&
@@ -155,16 +180,23 @@ public partial class Player : CharacterBody2D
             }
         }
 
-        // 划除条文（Q）
-        if (Input.IsActionJustPressed("strike"))
+        // 划除条文（Q）；防御中不可划除（同样属于主动输出）
+        if (Input.IsActionJustPressed("strike") && !guarding)
             TryStrike();
 
         // 技能（数字键 1 / 2）：CD 制。空格同时触发跳+攻击，故技能独立键避免误触。
         _cd1 = Mathf.Max(0f, _cd1 - d);
         _cd2 = Mathf.Max(0f, _cd2 - d);
         _qCd = Mathf.Max(0f, _qCd - d); // 划除技能（Q）冷却倒计时
-        if (Input.IsActionJustPressed("skill1") && _cd1 <= 0f) CastSkill1();
-        if (Input.IsActionJustPressed("skill2") && _cd2 <= 0f) CastSkill2();
+        _cd3 = Mathf.Max(0f, _cd3 - d);
+        _cd4 = Mathf.Max(0f, _cd4 - d);
+        if (_shieldTimer > 0f) { _shieldTimer -= d; if (_shieldTimer < 0f) _shieldTimer = 0f; }
+        if (_shield3 != null) _shield3.Visible = _shieldTimer > 0f;
+        // 技能 1~4：统一走 TryCast —— 需冷却就绪、非防御、且各消耗 1 技能点
+        if (Input.IsActionJustPressed("skill1")) TryCast(1, CastSkill1, ref _cd1, Cd1);
+        if (Input.IsActionJustPressed("skill2")) TryCast(2, CastSkill2, ref _cd2, Cd2);
+        if (Input.IsActionJustPressed("skill3")) TryCast(3, CastSkill3, ref _cd3, Cd3);
+        if (Input.IsActionJustPressed("skill4")) TryCast(4, CastSkill4, ref _cd4, Cd4);
 
         MoveAndSlide();
 
@@ -283,9 +315,19 @@ public partial class Player : CharacterBody2D
     }
 
     // ---------- 技能系统 ----------
-    public bool IsSkillReady(int i) => i == 1 ? _cd1 <= 0f : _cd2 <= 0f;
-    public float SkillCd(int i) => i == 1 ? _cd1 : _cd2;
-    public float SkillCdMax(int i) => i == 1 ? Cd1 : Cd2;
+    public bool IsSkillReady(int i) => i switch { 1 => _cd1 <= 0f, 2 => _cd2 <= 0f, 3 => _cd3 <= 0f, 4 => _cd4 <= 0f, _ => false };
+    public float SkillCd(int i) => i switch { 1 => _cd1, 2 => _cd2, 3 => _cd3, 4 => _cd4, _ => 0f };
+    public float SkillCdMax(int i) => i switch { 1 => Cd1, 2 => Cd2, 3 => Cd3, 4 => Cd4, _ => 0f };
+
+    /// <summary>统一释放技能 1~4：需冷却就绪、非防御、且至少有 1 技能点；释放即消耗 1 技能点并进入冷却。</summary>
+    private void TryCast(int id, System.Action cast, ref float cd, float cdMax)
+    {
+        if (IsGuarding || cd > 0f) return;                       // 防御中 / 冷却中：静默不触发
+        if (SkillPoints <= 0) { ShowPopup("需要技能点", Colors.Gray); return; }
+        SkillPoints--;                                           // 消耗 1 技能点（HUD 实时读取）
+        cd = cdMax;                                              // 进入冷却
+        cast();
+    }
 
     // 划除技能（Q 键）：5 秒冷却、无次数限制
     public bool IsQReady => _qCd <= 0f;
@@ -295,7 +337,6 @@ public partial class Player : CharacterBody2D
     /// <summary>技能1：在角色所在水平面释放一条贯穿全屏的毁灭直线，命中同平面 Boss。</summary>
     private void CastSkill1()
     {
-        _cd1 = Cd1;
         float py = GlobalPosition.Y;
         SpawnBeam(new Vector2[] { new Vector2(0f, py), new Vector2(960f, py) },
                   new Color(1f, 0.35f, 0.3f), 0.35f);
@@ -309,7 +350,6 @@ public partial class Player : CharacterBody2D
     /// <summary>技能2：以角色为中心向 8 个方向释放射线，命中范围内 Boss。</summary>
     private void CastSkill2()
     {
-        _cd2 = Cd2;
         Vector2 c = GlobalPosition;
         var pts = new System.Collections.Generic.List<Vector2> { c };
         for (int i = 0; i < 8; i++)
@@ -324,6 +364,26 @@ public partial class Player : CharacterBody2D
         if (boss != null && IsInstanceValid(boss) && c.DistanceTo(boss.GlobalPosition) < Skill2Range)
             boss.TakeDamage((int)Mathf.Round(Skill2Damage * (RuleManager.Instance != null ? RuleManager.Instance.AttackMult : 1f)));
         RuleManager.Instance?.PlaySFX("vacuum_start");
+        Shake();
+    }
+
+    /// <summary>技能3：青色护盾——3 秒无敌（可抵挡投技），14 秒 CD。</summary>
+    private void CastSkill3()
+    {
+        _shieldTimer = ShieldDur;
+        if (_shield3 != null) _shield3.Visible = true;
+        ShowPopup("护盾!", new Color(0.3f, 1f, 0.95f));
+        RuleManager.Instance?.PlaySFX("vacuum_start");
+        Shake();
+    }
+
+    /// <summary>技能4：自我治愈——立即回复 2 点生命值，18 秒 CD。</summary>
+    private void CastSkill4()
+    {
+        if (_hp < MaxHp) _hp = Mathf.Min(MaxHp, _hp + 2);
+        EmitSignal(SignalName.HealthChanged, _hp, MaxHp);
+        ShowPopup("+2", new Color(0.4f, 1f, 0.5f));
+        RuleManager.Instance?.PlaySFX("fall-a");   // 治愈类音效
         Shake();
     }
 
@@ -376,6 +436,59 @@ public partial class Player : CharacterBody2D
             return;
         }
         _invuln = 1.0f;
+    }
+
+    /// <summary>是否正在防御（按住 S）。BOSS 攻击命中瞬间若防御则被完全抵挡。</summary>
+    public bool IsGuarding => Input.IsActionPressed("guard");
+
+    /// <summary>来自 BOSS 攻击的伤害：防御中完全抵挡（优先于无敌帧，按住即生效）；
+    /// 否则扣血并给短无敌帧（避免弹幕单帧叠伤）。</summary>
+    public void TakeBossDamage(int amount)
+    {
+        if (_hp <= 0) return;
+        if (IsShieldActive()) { OnShieldBlock(); return; }   // 青色护盾：3 秒无敌，优先于一切 BOSS 伤害
+        if (IsGuarding) { OnGuardBlock(); return; }   // 防御优先：无视无敌帧，按住 S 即生效
+        if (_invuln > 0f) return;
+        _hp -= amount;
+        EmitSignal(SignalName.HealthChanged, _hp, MaxHp);
+        if (_hp <= 0)
+        {
+            EmitSignal(SignalName.Died);
+            return;
+        }
+        _invuln = 0.5f;
+    }
+
+    public void OnShieldBlock()
+    {
+        ShowPopup("护盾!", new Color(0.3f, 1f, 0.95f));
+        RuleManager.Instance?.PlaySFX("vacuum_start");
+    }
+
+    private void OnGuardBlock()
+    {
+        ShowPopup("格挡!", new Color(0.5f, 0.8f, 1f));
+        RuleManager.Instance?.PlaySFX("vacuum_start");
+    }
+
+    /// <summary>青色护盾（技能3）是否生效中：3 秒无敌，可抵挡投技。</summary>
+    public bool IsShieldActive() => _shieldTimer > 0f;
+
+    /// <summary>投技冻结：true 时 _PhysicsProcess 早退，暂停输入与物理（非树暂停，滤镜动画照常）。</summary>
+    public void SetFrozen(bool f) => _frozen = f;
+
+    /// <summary>投技击飞：给一个强上抛速度（重力随后接管落回）。</summary>
+    public void KnockUp(float vy = -760f) => Velocity = new Vector2(Velocity.X, vy);
+
+    /// <summary>投技伤害：仅青色护盾可挡，无视防御 S 与无敌帧（让该技能真正危险、必须靠护盾应对）。</summary>
+    public void TakeGrab(int amount)
+    {
+        if (IsShieldActive()) { OnShieldBlock(); return; }
+        if (_hp <= 0) return;
+        _hp -= amount;
+        EmitSignal(SignalName.HealthChanged, _hp, MaxHp);
+        if (_hp <= 0) { EmitSignal(SignalName.Died); return; }
+        _invuln = 0.5f;
     }
 
     private void ShowPopup(string text, Color color)

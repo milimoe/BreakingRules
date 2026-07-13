@@ -51,12 +51,10 @@ public partial class LevelDirector : Node2D
         boss.BossName = cfg.Name;
         boss.MaxHp = cfg.MaxHp;
         boss.SpawnInterval = cfg.SpawnInterval;
-        boss.ChargeInterval = cfg.ChargeInterval;
-        boss.ChargeSpeed = cfg.ChargeSpeed;
-        boss.ChargeDuration = cfg.ChargeDuration;
-        boss.MeleeDamage = cfg.MeleeDamage;
-        boss.MeleeCooldown = cfg.MeleeCooldown;
+        boss.AttackInterval = cfg.AttackInterval;
         boss.HoverSpeed = cfg.HoverSpeed;
+        boss.BaseDamage = cfg.BaseDamage;
+        boss.BulletCount = cfg.BulletCount;
         boss.TexturePath = cfg.TexturePath;
         boss.Tint = cfg.Tint;
         boss.GlobalPosition = new Vector2(820f, 300f);

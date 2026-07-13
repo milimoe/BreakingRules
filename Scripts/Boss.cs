@@ -1,22 +1,35 @@
 using Godot;
+using System;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace BreakingRules;
 
 /// <summary>
-/// Boss「初审官」：单阶段，满血。定时生成禁跳区条文 + 平A + 冲锋。
-/// 胜利 = 打空其血量；失败 = 玩家血 0。
+/// Boss：不再有接触伤害。改为 7 种主动攻击模组，每次攻击前都有红色描边短暂闪烁（预警），
+/// 玩家可按 S 防御，在攻击命中瞬间完全抵挡伤害。
+/// 攻击序列用 async/ToSignal 编排，死亡时通过 CancellationToken 取消进行中的攻击。
 /// </summary>
 [GlobalClass]
 public partial class Boss : CharacterBody2D
 {
+    // ---- 配置（由 BossRoster / LevelDirector 注入） ----
     [Export] public int MaxHp { get; set; } = 24;
-    [Export] public float SpawnInterval { get; set; } = 10f;
-    [Export] public float ChargeInterval { get; set; } = 6f;
-    [Export] public float ChargeSpeed { get; set; } = 620f;
-    [Export] public float ChargeDuration { get; set; } = 0.4f;
-    [Export] public float MeleeDamage { get; set; } = 1f;
-    [Export] public float MeleeCooldown { get; set; } = 1.2f;
-    [Export] public float HoverSpeed { get; set; } = 40f;
+    [Export] public float SpawnInterval { get; set; } = 10f;     // 生成条文间隔
+    [Export] public float AttackInterval { get; set; } = 2.0f;    // 两次主动攻击间隔（越低越频繁，常规攻击节奏）
+    [Export] public float HoverSpeed { get; set; } = 100f;       // 平时飘移速度（主动靠近玩家）
+    [Export] public float BaseDamage { get; set; } = 1f;         // 每个攻击基础伤害（暴怒 +1）
+    [Export] public float TelegraphTime { get; set; } = 0.45f;   // 红色描边闪烁时长（预警窗口）
+    [Export] public float HitRange { get; set; } = 90f;          // 近战命中半径
+    [Export] public float LungeDist { get; set; } = 220f;        // 扑击突进距离
+    [Export] public float BulletDamage { get; set; } = 1f;
+    [Export] public float BulletSpeed { get; set; } = 360f;
+    [Export] public int BulletCount { get; set; } = 10;
+    [Export] public float BulletInterval { get; set; } = 0.6f;
+    [Export] public float BeamRange { get; set; } = 320f;
+    [Export] public float EnrageDuration { get; set; } = 10f;
+    [Export] public float HealPercent { get; set; } = 0.15f;
+    [Export] public float HealDelay { get; set; } = 2f;
     [Export] public string BossName { get; set; } = "初审官";
     [Export] public string TexturePath { get; set; } = "res://Assets/PNG/Enemies/Tiles/tile_0000.png";
     [Export] public Color Tint { get; set; } = Colors.White;
@@ -24,24 +37,41 @@ public partial class Boss : CharacterBody2D
     [Signal] public delegate void HealthChangedEventHandler(int hp, int maxHp);
     [Signal] public delegate void DiedEventHandler();
 
-    private Sprite2D _sprite;
+    private enum AttackKind { Lunge, Claws, Gun, Beam, Blink, Enrage, Heal }
+
+    // 平时与玩家保持的距离（主动靠近到此距离，不贴脸也不拉太远）
+    private const float RestDistance = 140f;
+
+    // 投技（抓取）：与玩家近距离持续接触超过 GrabHold 秒后可能触发；无前摇，
+    // 仅青色护盾可挡。触发后冻结双方 1 秒并播放 X 射线窒息滤镜，再击飞玩家。
+    private const float GrabRange = 110f;   // 触发所需近距离（< 常规保持距离 140，须玩家主动贴脸）
+    private const float GrabHold = 3f;      // 持续接触达到此秒数才进入判定
+    private const float GrabChance = 0.6f;  // 进入判定后的触发概率
+    private const float GrabCooldown = 8f;  // 两次投技最小间隔
+
+    private AnimatedSprite2D _sprite;
+    private Sprite2D _outline;      // 红色描边光环（仅预警时明灭，身体本体 Tint 保持不变）
     private Player _target;
     private Color _baseTint = Colors.White;
     private int _hp;
     private float _spawnTimer;
-    private float _chargeTimer;
-    private float _chargeLeft;
-    private float _meleeCd;
-    private Vector2 _chargeDir;
-    private bool _touchingPlayer;   // 玩家本体是否正贴着 Boss（接触伤害区）
+    private float _attackTimer;
+    private int _enrageBonus;
+    private bool _attackActive;
+    private CancellationTokenSource _cts;
+    private CancellationTokenSource _buffCts;   // 自愈/暴怒增益的独立取消源（非阻塞，不参与攻击冻结）
+    private Label _statusIcon;   // 暴怒/自愈头顶标志
+    private float _grabProx;            // 当前已持续近距离接触时长
+    private float _grabCd;              // 投技冷却
+    private bool _grabActive;           // 投技进行中（防止重入）
+    private CancellationTokenSource _gcts;  // 投技独立取消源（死亡/场景切换取消）
 
     // 候选规则类型（随机抽一条）
     private static readonly RuleMode[] RuleTypes =
     {
         RuleMode.NoJump, RuleMode.NoAttack, RuleMode.NoStrike, RuleMode.Slow
     };
-    // 可站立表面（top=碰撞顶面 Y，xMin/xMax=该表面可落点的 x 范围）。
-    // 规则锚定在表面上、随机选一个表面 + 随机 x，从而散布到竞技场各处。
+    // 可站立表面（top=碰撞顶面 Y，xMin/xMax=该表面可落点的 x 范围）
     private static readonly (float top, float xMin, float xMax)[] Surfaces =
     {
         (500f,  30f, 930f),  // 地面
@@ -57,35 +87,33 @@ public partial class Boss : CharacterBody2D
     public override void _Ready()
     {
         _hp = MaxHp;
-        _sprite = new Sprite2D();
-        _sprite.Texture = GD.Load<Texture2D>(TexturePath);
-        _sprite.Scale = new Vector2(2f, 2f);
+        _sprite = new AnimatedSprite2D();
+        SetupBossAnimation();
+        _sprite.Scale = new Vector2(2f, 2f);   // 敌方贴图 16px，×2 与玩家一致
         _baseTint = Tint;
         _sprite.Modulate = _baseTint;
         AddChild(_sprite);
+        // 红色描边光环：比身体稍大、置于体后，预警时明灭闪烁；
+        // 身体本体始终保留自身 Tint，故红 BOSS 也能清晰区分「预警」与「常态」。
+        _outline = new Sprite2D();
+        _outline.Texture = GD.Load<Texture2D>("res://Assets/PNG/Enemies/Tiles/tile_0000.png");
+        _outline.Modulate = new Color(1f, 0.2f, 0.2f, 1f);
+        _outline.Scale = new Vector2(2.6f, 2.6f);
+        _outline.ZIndex = -1;
+        _outline.Visible = false;
+        AddChild(_outline);
         AddToGroup("boss");
 
-        // 接触伤害区：仅当玩家本体真正碰到 Boss 时才结算（不再用距离判定）。
-        var touch = new Area2D();
-        touch.Name = "TouchZone";
-        var tz = new CollisionShape2D();
-        tz.Shape = new RectangleShape2D { Size = new Vector2(50f, 50f) };
-        touch.AddChild(tz);
-        AddChild(touch);
-        touch.BodyEntered += OnTouchEntered;
-        touch.BodyExited += OnTouchExited;
         _target = GetTree().GetFirstNodeInGroup("player") as Player;
         _spawnTimer = 5f;
-        _chargeTimer = ChargeInterval;
+        _attackTimer = AttackInterval;
         EmitSignal(SignalName.HealthChanged, _hp, MaxHp);
     }
 
     public override void _PhysicsProcess(double delta)
     {
-        if (_target == null || !IsInstanceValid(_target))
-            _target = GetTree().GetFirstNodeInGroup("player") as Player;
+        RefreshTarget();
         if (_target == null) return;
-
         float d = (float)delta;
 
         // 生成条文：随机类型 + 随机表面 + 随机 x → 散布到竞技场各处
@@ -93,70 +121,473 @@ public partial class Boss : CharacterBody2D
         if (_spawnTimer <= 0f)
         {
             _spawnTimer = SpawnInterval;
-            var mode = RuleTypes[(int)GD.RandRange(0f, RuleTypes.Length)];
-            var s = Surfaces[(int)GD.RandRange(0f, Surfaces.Length)];
+            var mode = RuleTypes[(int)GD.RandRange(0f, RuleTypes.Length - 1f)];
+            var s = Surfaces[(int)GD.RandRange(0f, Surfaces.Length - 1f)];
             float x = (float)GD.RandRange(s.xMin, s.xMax);
-            float bandY = s.top - 52f; // 条文飘在表面上方，区域正好罩住站立点
             Shout(ShoutFor(mode));
-            RuleManager.Instance?.SpawnRule(mode, new Vector2(x, bandY));
+            RuleManager.Instance?.SpawnRule(mode, new Vector2(x, s.top - 52f));
         }
 
-        // 冲锋
-        _chargeTimer -= d;
-        if (_chargeLeft > 0f)
+        if (_attackActive)
         {
-            _chargeLeft -= d;
-            Velocity = _chargeDir * ChargeSpeed;
+            // 攻击动画由 tween 控制位置；physics 不移动，避免抢夺 Position
+            Velocity = Vector2.Zero;
+            return;
         }
-        else
+
+        // 攻击调度：普通攻击遵循 AttackInterval 间隔；自愈/暴怒为「非阻塞增益」，
+        // 立即发动且不冻结移动，随后本帧立即再抽一个真正的攻击（无需再等一轮间隔）。
+        // 间隔期间 boss 走下方 else 分支持续靠近玩家。
+        _attackTimer -= d;
+        if (_attackTimer <= 0f && !_attackActive)
         {
-            if (_chargeTimer <= 0f)
+            var kind = PickAttack();
+            if (kind == AttackKind.Enrage || kind == AttackKind.Heal)
             {
-                _chargeTimer = ChargeInterval;
-                _chargeLeft = ChargeDuration;
-                _chargeDir = (_target.GlobalPosition - GlobalPosition).Normalized();
+                StartBuff(kind);                         // 非阻塞：boss 继续靠近 / 照常攻击
+                int g = 0;                               // 极端下连续抽到 buff，最多补抽 8 次取真正攻击
+                while ((kind == AttackKind.Enrage || kind == AttackKind.Heal) && g++ < 8)
+                    kind = PickAttack();
             }
-            else
-            {
-                // 平时缓慢靠近玩家
-                Vector2 toPlayer = (_target.GlobalPosition - GlobalPosition).Normalized();
-                Velocity = toPlayer * HoverSpeed;
-            }
+            _attackTimer = AttackInterval;
+            StartAttack(kind);
+            return;
+        }
 
-            // 接触伤害：仅当玩家本体正贴着 Boss 时才结算
-            _meleeCd -= d;
-            if (_meleeCd <= 0f && _touchingPlayer)
+        // 投技（抓取）：与玩家近距离持续接触超过 3 秒后可能触发。无前摇，
+        // 仅青色护盾可挡；触发后冻结双方 1 秒并播放 X 射线窒息滤镜，再击飞玩家。
+        _grabCd = Mathf.Max(0f, _grabCd - d);
+        if (_target != null)
+        {
+            float pd = _target.GlobalPosition.DistanceTo(GlobalPosition);
+            _grabProx = pd < GrabRange ? _grabProx + d : 0f;
+            if (_grabProx >= GrabHold && _grabCd <= 0f && !_attackActive && !_grabActive)
             {
-                _meleeCd = MeleeCooldown;
-                _target.TakeDamage((int)MeleeDamage);
+                _grabProx = 0f;
+                _grabCd = GrabCooldown;
+                if (GD.Randf() < GrabChance) GrabAsync();
             }
         }
 
+        // 平时主动靠近玩家，维持中距离（RestDistance）。HoverSpeed 已提高，
+        // 攻击间隙会明显向玩家逼近，而不是停在远处。
+        Vector2 toP = _target.GlobalPosition - GlobalPosition;
+        float dist = toP.Length();
+        Vector2 dir = dist > 1f ? toP / dist : Vector2.Zero;
+        float desired = RestDistance;
+        float spd = HoverSpeed * (dist > desired ? 1f : -0.6f);
+        Velocity = dir * spd;
         MoveAndSlide();
+        GlobalPosition = new Vector2(
+            Mathf.Clamp(GlobalPosition.X, 40f, 920f),
+            Mathf.Clamp(GlobalPosition.Y, 80f, 460f));
     }
 
-    private void OnTouchEntered(Node body)
+    // ---------- 攻击调度 ----------
+    private void RefreshTarget()
     {
-        if (body is Player) _touchingPlayer = true;
+        if (_target == null || !IsInstanceValid(_target))
+            _target = GetTree().GetFirstNodeInGroup("player") as Player;
     }
 
-    private void OnTouchExited(Node body)
+    private AttackKind PickAttack()
     {
-        if (body is Player) _touchingPlayer = false;
+        int n = (int)GD.RandRange(0f, 7f); // 0..6 七选一
+        return (AttackKind)n;
     }
 
+    private async void StartAttack(AttackKind kind)
+    {
+        if (_attackActive || _hp <= 0) return;
+        _attackActive = true;
+        _cts = new CancellationTokenSource();
+        try
+        {
+            await RunAttack(kind, _cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // 死亡/场景切换取消：正常退出
+        }
+        catch (Exception e)
+        {
+            GD.PrintErr("Boss attack sequence error: ", e);
+        }
+        finally
+        {
+            _attackActive = false;
+            _cts?.Dispose();
+            _cts = null;
+        }
+    }
+
+    private async Task RunAttack(AttackKind kind, CancellationToken token)
+    {
+        switch (kind)
+        {
+            case AttackKind.Lunge:  await AtkLunge(token);  break;
+            case AttackKind.Claws:  await AtkClaws(token);  break;
+            case AttackKind.Gun:    await AtkGun(token);    break;
+            case AttackKind.Beam:   await AtkBeam(token);   break;
+            case AttackKind.Blink:  await AtkBlink(token);  break;
+            // Enrage / Heal 不再走攻击序列（见 StartBuff，非阻塞），此处无需分支
+        }
+    }
+
+    // ---------- 通用小工具 ----------
+    private async Task Delay(float sec, CancellationToken token)
+    {
+        var t = GetTree().CreateTimer(sec);
+        await ToSignal(t, "timeout");
+        token.ThrowIfCancellationRequested();
+    }
+
+    private async Task MoveTo(Vector2 target, float dur, CancellationToken token)
+    {
+        var tw = CreateTween();
+        tw.TweenProperty(this, "global_position", target, dur);
+        await ToSignal(tw, "finished");
+        token.ThrowIfCancellationRequested();
+    }
+
+    /// <summary>红色描边闪烁（预警窗口）：身体本体保持自身 Tint 不变，
+    /// 仅让身后红色光环快速明灭 3 次，作为清晰、与 BOSS 体色无关的「即将攻击」预警，
+    /// 解决「红 BOSS 看起来一直在红闪、分不清是否预警」的问题。</summary>
+    private void FlashRed()
+    {
+        if (_outline == null) return;
+        _outline.Visible = true;
+        _outline.Modulate = new Color(1f, 0.2f, 0.2f, 1f);
+        var tw = CreateTween();
+        // 3 次快速明灭：明显是「警告」而非常驻状态
+        for (int i = 0; i < 3; i++)
+        {
+            tw.TweenProperty(_outline, "modulate:a", 0.1f, TelegraphTime * 0.13f);
+            tw.TweenProperty(_outline, "modulate:a", 1f, TelegraphTime * 0.13f);
+        }
+        tw.TweenCallback(Callable.From(() =>
+        {
+            if (_outline != null) _outline.Visible = false;
+        }));
+    }
+
+    private async Task Telegraph(CancellationToken token)
+    {
+        FlashRed();
+        await Delay(TelegraphTime, token);
+    }
+
+    private void TryHit(float range)
+    {
+        var p = _target;
+        if (p == null || !IsInstanceValid(p)) return;
+        if (p.GlobalPosition.DistanceTo(GlobalPosition) <= range)
+            DealDamageToPlayer(BaseDamage);
+    }
+
+    private void DealDamageToPlayer(float dmg)
+    {
+        var p = _target;
+        if (p == null || !IsInstanceValid(p)) return;
+        int total = (int)Mathf.Round(dmg) + _enrageBonus;
+        p.TakeBossDamage(total);
+    }
+
+    /// <summary>保持中距离的后撤点：从玩家方向反推 desired 距离。</summary>
+    private Vector2 RestPos()
+    {
+        Vector2 pp = _target != null ? _target.GlobalPosition : GlobalPosition + Vector2.Right * 240f;
+        Vector2 dir = GlobalPosition - pp;
+        if (dir.Length() < 1f) dir = Vector2.Left;
+        return ClampArena(pp + dir.Normalized() * RestDistance);
+    }
+
+    private static Vector2 ClampArena(Vector2 p) =>
+        new Vector2(Mathf.Clamp(p.X, 40f, 920f), Mathf.Clamp(p.Y, 80f, 460f));
+
+    private void DrawBeam(Vector2[] points, Color color, float life)
+    {
+        var line = new Line2D();
+        line.Points = points;
+        line.Width = 4f;
+        line.DefaultColor = color;
+        GetTree().CurrentScene?.AddChild(line);
+        if (line.GetParent() == null) return;
+        var t = CreateTween();
+        t.TweenProperty(line, "modulate:a", 0f, life);
+        t.TweenCallback(Callable.From(() => line.QueueFree()));
+    }
+
+    // ---------- 7 种攻击模组 ----------
+    // 1) 扑击：后撤 1 步 → 红闪 → 朝玩家方向扑 → 命中 1 点
+    private async Task AtkLunge(CancellationToken token)
+    {
+        Vector2 playerPos = _target != null ? _target.GlobalPosition : GlobalPosition + Vector2.Right * 100f;
+        Vector2 away = (GlobalPosition - playerPos);
+        if (away.Length() > 1f) away = away.Normalized();
+        await MoveTo(GlobalPosition + away * 50f, 0.2f, token);   // 后撤
+        await Telegraph(token);                                    // 预警
+        Vector2 lungeTarget = GlobalPosition + (playerPos - GlobalPosition).Normalized() * LungeDist;
+        await MoveTo(ClampArena(lungeTarget), 0.22f, token);       // 扑
+        TryHit(HitRange);
+        await Delay(0.25f, token);
+        await MoveTo(RestPos(), 0.3f, token);                      // 收回
+    }
+
+    // 2) 利爪：跳起 → 红闪 → 伸爪 → 命中 1 点
+    private async Task AtkClaws(CancellationToken token)
+    {
+        Vector2 playerPos = _target != null ? _target.GlobalPosition : GlobalPosition;
+        await MoveTo(GlobalPosition + new Vector2(0f, -70f), 0.18f, token);  // 跳起
+        await Telegraph(token);
+        Vector2 dir = (playerPos - GlobalPosition).Normalized();
+        DrawBeam(new[] { GlobalPosition, GlobalPosition + dir * 70f }, new Color(1f, 0.9f, 0.9f), 0.2f);
+        await MoveTo(GlobalPosition + dir * 60f, 0.12f, token);    // 伸爪前冲
+        TryHit(HitRange);
+        await Delay(0.3f, token);
+        await MoveTo(RestPos(), 0.3f, token);                      // 落回
+    }
+
+    // 3) 火枪：掏枪(放大前摇) → 红闪 → 每 0.6s 一发方块弹幕，共 10 发，每发 1 点
+    private async Task AtkGun(CancellationToken token)
+    {
+        var grow = CreateTween();
+        grow.TweenProperty(_sprite, "scale", new Vector2(2.4f, 2.4f), 0.15f); // 掏枪前摇
+        await Delay(0.2f, token);
+        await Telegraph(token);
+        for (int i = 0; i < BulletCount; i++)
+        {
+            token.ThrowIfCancellationRequested();
+            Vector2 playerPos = _target != null ? _target.GlobalPosition : GlobalPosition;
+            Vector2 dir = (playerPos - GlobalPosition).Normalized();
+            SpawnBullet(GlobalPosition, dir);
+            await Delay(BulletInterval, token);
+        }
+        var shrink = CreateTween();
+        shrink.TweenProperty(_sprite, "scale", new Vector2(2f, 2f), 0.15f);
+    }
+
+    // 4) 射线：左转 + 右转 → 红闪 → 八向射线，命中 1 点
+    private async Task AtkBeam(CancellationToken token)
+    {
+        var t1 = CreateTween(); t1.TweenProperty(_sprite, "rotation", -0.35f, 0.18f);
+        await Delay(0.18f, token);
+        var t2 = CreateTween(); t2.TweenProperty(_sprite, "rotation", 0.35f, 0.18f);
+        await Delay(0.18f, token);
+        var t3 = CreateTween(); t3.TweenProperty(_sprite, "rotation", 0f, 0.12f);
+        await Delay(0.12f, token);
+        await Telegraph(token);
+        Vector2 c = GlobalPosition;
+        var pts = new System.Collections.Generic.List<Vector2> { c };
+        for (int i = 0; i < 8; i++)
+        {
+            float a = i * Mathf.Pi / 4f;
+            Vector2 d = new Vector2(Mathf.Cos(a), Mathf.Sin(a));
+            pts.Add(c);
+            pts.Add(c + d * BeamRange);
+        }
+        DrawBeam(pts.ToArray(), new Color(1f, 0.4f, 0.9f), 0.4f);
+        var p = _target;
+        if (p != null && IsInstanceValid(p) && p.GlobalPosition.DistanceTo(c) <= BeamRange)
+            DealDamageToPlayer(BaseDamage);
+        await Delay(0.4f, token);
+    }
+
+    // 5) 闪现：红闪(可见) → 遁入虚空(淡出) → 闪现到玩家后方 → 伸爪，命中 1 点
+    private async Task AtkBlink(CancellationToken token)
+    {
+        Vector2 playerPos = _target != null ? _target.GlobalPosition : GlobalPosition;
+        await Telegraph(token);                                    // 红闪预警（仍可见）
+        var vanish = CreateTween();
+        vanish.TweenProperty(_sprite, "modulate:a", 0f, 0.15f);    // 遁入虚空
+        await Delay(0.15f, token);
+        Vector2 behind = playerPos + new Vector2(playerPos.X < 480f ? 90f : -90f, 0f);
+        GlobalPosition = ClampArena(behind);                       // 闪现到玩家后方
+        var appear = CreateTween();
+        appear.TweenProperty(_sprite, "modulate:a", 1f, 0.15f);
+        await Delay(0.15f, token);
+        Vector2 dir = (playerPos - GlobalPosition).Normalized();
+        DrawBeam(new[] { GlobalPosition, GlobalPosition + dir * 70f }, new Color(1f, 0.9f, 0.9f), 0.2f);
+        await MoveTo(GlobalPosition + dir * 50f, 0.1f, token);     // 伸爪
+        TryHit(HitRange);
+        await Delay(0.3f, token);
+        await MoveTo(RestPos(), 0.3f, token);
+    }
+
+    /// <summary>自愈 / 暴怒：非阻塞增益（替代原攻击序列分支）。
+    /// 关键改动：不再把 _attackActive 置真，因此 boss 在增益持续期间照常靠近玩家、
+    /// 照常发动 2s 间隔内的普通攻击——解决「抽中自愈/暴怒就原地挂机」的问题。
+    /// 抽中时本帧还会立即再抽一个真正攻击，故无需再等一轮 AttackInterval。
+    /// 死亡/场景切换时由 _buffCts 取消，避免残留增益计时。</summary>
+    private async void StartBuff(AttackKind kind)
+    {
+        if (_hp <= 0) return;
+        _buffCts?.Cancel();
+        _buffCts = new CancellationTokenSource();
+        CancellationToken token = _buffCts.Token;
+        try
+        {
+            if (kind == AttackKind.Enrage)
+            {
+                _enrageBonus = 1;
+                ShowStatusIcon("🔥");
+                RuleManager.Instance?.PlaySFX("vacuum_start");
+                await Delay(EnrageDuration, token);
+                _enrageBonus = 0;
+                HideStatusIcon();
+            }
+            else // Heal
+            {
+                ShowStatusIcon("❄");
+                await Delay(HealDelay, token);
+                if (_hp > 0)
+                {
+                    int heal = (int)Mathf.Ceil(MaxHp * HealPercent);
+                    _hp = Mathf.Min(MaxHp, _hp + heal);
+                    EmitSignal(SignalName.HealthChanged, _hp, MaxHp);
+                    var tw = CreateTween();
+                    tw.TweenProperty(_sprite, "modulate", Colors.Green, 0.1f);
+                    tw.TweenProperty(_sprite, "modulate", _baseTint, 0.25f);
+                }
+                HideStatusIcon();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // 死亡/场景切换取消：正常退出
+        }
+        finally
+        {
+            _buffCts?.Dispose();
+            _buffCts = null;
+        }
+    }
+
+    private void SpawnBullet(Vector2 origin, Vector2 dir)
+    {
+        var b = new BossBullet();
+        b.GlobalPosition = origin;
+        b.Vel = dir * BulletSpeed;
+        b.Damage = BulletDamage + _enrageBonus;
+        GetTree().CurrentScene?.AddChild(b);
+    }
+
+    private void ShowStatusIcon(string text)
+    {
+        if (_statusIcon == null)
+        {
+            _statusIcon = new Label();
+            _statusIcon.AddThemeFontSizeOverride("font_size", 30);
+            _statusIcon.HorizontalAlignment = HorizontalAlignment.Center;
+            _statusIcon.Size = new Vector2(60f, 40f);
+            _statusIcon.Position = new Vector2(-30f, -90f);
+            AddChild(_statusIcon);
+        }
+        _statusIcon.Text = text;
+        _statusIcon.Visible = true;
+    }
+
+    private void HideStatusIcon()
+    {
+        if (_statusIcon != null) _statusIcon.Visible = false;
+    }
+
+    // ---------- 投技（抓取）----------
+    // 无前摇：与玩家贴脸超过 GrabHold 秒后按概率触发。不进 7 模组轮换、
+    // 不显示红色描边预警，唯一防御是玩家提前开「青色护盾」。
+    private async void GrabAsync()
+    {
+        if (_grabActive || _hp <= 0) return;
+        _grabActive = true;
+        _attackActive = true;   // 复用物理冻结分支（_PhysicsProcess 早退，攻击间隙不移动）
+        _gcts?.Cancel();
+        _gcts = new CancellationTokenSource();
+        var token = _gcts.Token;
+        try
+        {
+            if (_target != null && IsInstanceValid(_target)) _target.SetFrozen(true);
+            FlashSuffocation();                          // X 射线 / 窒息对比失真
+            await Delay(1.0f, token);                   // 游戏暂停 1 秒
+            if (_target != null && IsInstanceValid(_target)) _target.SetFrozen(false);
+            // 击飞至空中 + 3 点伤害（仅青色护盾可挡；无视防御 S 与无敌帧）
+            if (_target != null && IsInstanceValid(_target))
+            {
+                if (_target.IsShieldActive()) _target.OnShieldBlock();
+                else { _target.KnockUp(-760f); _target.TakeGrab(3); }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            if (_target != null) _target.SetFrozen(false);
+        }
+        catch (Exception e)
+        {
+            GD.PrintErr("Boss grab error: ", e);
+        }
+        finally
+        {
+            _grabActive = false;
+            _attackActive = false;
+            _gcts?.Dispose();
+            _gcts = null;
+        }
+    }
+
+    /// <summary>全屏 X 射线 / 窒息滤镜：对比失真、在强白与深蓝之间快速交替后淡出，
+    /// 模拟「游戏暂停 1 秒」的窒息感。独立 CanvasLayer、不拦截输入。</summary>
+    private void FlashSuffocation()
+    {
+        var layer = new CanvasLayer();
+        layer.Layer = 127;
+        var rect = new ColorRect();
+        rect.Color = new Color(0.7f, 0.95f, 1f, 0f);
+        rect.MouseFilter = Control.MouseFilterEnum.Ignore;
+        rect.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+        layer.AddChild(rect);
+        GetTree().CurrentScene?.AddChild(layer);
+        var tw = CreateTween();
+        tw.TweenProperty(rect, "color", new Color(0.92f, 1f, 1f, 0.72f), 0.12f);
+        tw.TweenProperty(rect, "color", new Color(0.08f, 0.18f, 0.5f, 0.55f), 0.18f);
+        tw.TweenProperty(rect, "color", new Color(0.92f, 1f, 1f, 0.66f), 0.18f);
+        tw.TweenProperty(rect, "color", new Color(0.08f, 0.18f, 0.5f, 0.5f), 0.22f);
+        tw.TweenProperty(rect, "color", new Color(0f, 0f, 0f, 0f), 0.3f);
+        tw.TweenCallback(Callable.From(() => layer.QueueFree()));
+    }
+
+    // ---------- 受击 / 死亡 ----------
     public void TakeDamage(int amount)
     {
         if (_hp <= 0) return;
         _hp -= amount;
         EmitSignal(SignalName.HealthChanged, _hp, MaxHp);
-        // 受击闪烁（闪白后回到本 BOSS 的染色）
         var t = CreateTween();
         t.TweenProperty(_sprite, "modulate", Colors.White, 0.06f);
         t.TweenProperty(_sprite, "modulate", _baseTint, 0.06f);
         RuleManager.Instance?.PlaySFX("boss_hit");
         if (_hp <= 0)
+        {
+            _cts?.Cancel();     // 取消进行中的攻击序列
+            _gcts?.Cancel();    // 取消进行中的投技序列
+            _buffCts?.Cancel(); // 取消进行中的增益计时（自愈/暴怒）
+            _enrageBonus = 0;
+            if (_target != null) _target.SetFrozen(false);    // 解除可能残留的窒息冻结
+            if (_outline != null) _outline.Visible = false;   // 清除可能残留的预警红环
+            HideStatusIcon();
             EmitSignal(SignalName.Died);
+        }
+    }
+
+    private void SetupBossAnimation()
+    {
+        var frames = new SpriteFrames();
+        if (frames.HasAnimation("default")) frames.RemoveAnimation("default");
+        frames.AddAnimation("idle");
+        for (int i = 0; i <= 7; i++)
+            frames.AddFrame("idle", GD.Load<Texture2D>($"res://Assets/PNG/Enemies/Tiles/tile_{i:D4}.png"));
+        frames.SetAnimationSpeed("idle", 8);
+        frames.SetAnimationLoopMode("idle", SpriteFrames.LoopMode.Linear);
+        _sprite.SpriteFrames = frames;
+        _sprite.Play("idle");
     }
 
     private static string ShoutFor(RuleMode m) => m switch

@@ -15,8 +15,8 @@ public partial class Hud : Control
     private Panel _goldFrame;
     private Label _vacuum;
     private Label _skillLabel;
-    private TextureRect[] _skillIcons = new TextureRect[3];
-    private Label[] _skillCdLabels = new Label[3];
+    private TextureRect[] _skillIcons = new TextureRect[5];
+    private Label[] _skillCdLabels = new Label[5];
 
     public override void _Ready()
     {
@@ -131,12 +131,14 @@ public partial class Hud : Control
         _skillLabel.Modulate = new Color(1f, 0.9f, 0.4f); // 金：技能点
         AddChild(_skillLabel);
 
-        // 槽定义：按键、图标种类、强调色（Q 青 / 1 橙红 / 2 蓝）
+        // 槽定义：按键、图标种类、强调色（Q 青 / 1 橙红 / 2 蓝 / 3 青护盾 / 4 绿治愈）
         var slots = new (string key, int icon, Color accent)[]
         {
             ("Q", 3, new Color(0.40f, 0.95f, 0.90f)),
             ("1", 1, new Color(1.00f, 0.45f, 0.35f)),
             ("2", 2, new Color(0.50f, 0.90f, 1.00f)),
+            ("3", 4, new Color(0.30f, 1.00f, 0.95f)),
+            ("4", 5, new Color(0.45f, 1.00f, 0.55f)),
         };
         for (int i = 0; i < slots.Length; i++)
         {
@@ -190,10 +192,12 @@ public partial class Hud : Control
         int n = _player.SkillPoints;
         int shown = Mathf.Min(n, 10);
         _skillLabel.Text = n == 0 ? "技能 ✨ 0" : "技能 " + new string('✨', shown) + $" {n}";
-        // 槽 0 = Q（5s CD），槽 1/2 = 技能 1/2
+        // 槽 0 = Q（5s CD），槽 1~4 = 技能 1~4
         UpdateSlot(0, _player.IsQReady, _player.QSkillCd, _player.QSkillCdMax);
         UpdateSlot(1, _player.IsSkillReady(1), _player.SkillCd(1), _player.SkillCdMax(1));
         UpdateSlot(2, _player.IsSkillReady(2), _player.SkillCd(2), _player.SkillCdMax(2));
+        UpdateSlot(3, _player.IsSkillReady(3), _player.SkillCd(3), _player.SkillCdMax(3));
+        UpdateSlot(4, _player.IsSkillReady(4), _player.SkillCd(4), _player.SkillCdMax(4));
     }
 
     private void UpdateSlot(int idx, bool ready, float cd, float max)
@@ -212,6 +216,8 @@ public partial class Hud : Control
         {
             1 => new Color(1f, 0.4f, 0.3f),    // 毁灭直线：橙红
             2 => new Color(0.5f, 0.9f, 1f),    // 八向射线：蓝
+            4 => new Color(0.3f, 1f, 0.95f),   // 青色护盾
+            5 => new Color(0.45f, 1f, 0.55f),  // 自我治愈：绿
             _ => new Color(0.4f, 0.95f, 0.9f)  // 划除(Q)：青
         };
         if (kind == 1)
@@ -233,6 +239,16 @@ public partial class Hud : Control
                 }
             }
             img.SetPixel(16, 16, col);
+        }
+        else if (kind == 4)  // 青色护盾：空心方框
+        {
+            for (int i = 6; i <= 26; i++) { img.SetPixel(i, 6, col); img.SetPixel(i, 26, col); }
+            for (int j = 6; j <= 26; j++) { img.SetPixel(6, j, col); img.SetPixel(26, j, col); }
+        }
+        else if (kind == 5)  // 自我治愈：十字
+        {
+            for (int i = 10; i <= 22; i++) { img.SetPixel(i, 15, col); img.SetPixel(i, 16, col); }
+            for (int j = 10; j <= 22; j++) { img.SetPixel(15, j, col); img.SetPixel(16, j, col); }
         }
         else // kind == 3：划除 = 对角斜杠
         {

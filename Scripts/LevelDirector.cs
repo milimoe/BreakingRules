@@ -90,7 +90,8 @@ public partial class LevelDirector : Node2D
 
         ShowDialog(title, stats,
             (nextLabel, new Action(OnNext)),
-            ("重新开始  (R)", new Action(OnRestart)));
+            ("重新开始  (R)", new Action(OnRestart)),
+            ("返回标题  (T)", new Action(OnReturnToTitle)));
 
         GetTree().Paused = true; // 冻结全场：玩家/Boss/条文均停止
     }
@@ -101,7 +102,8 @@ public partial class LevelDirector : Node2D
         _canNext = false;
         string stats = StatsLine(false);
         ShowDialog("被终审 · 失败", stats,
-            ("重新开始  (R)", new Action(OnRestart)));
+            ("重新开始  (R)", new Action(OnRestart)),
+            ("返回标题  (T)", new Action(OnReturnToTitle)));
         GetTree().Paused = true;
     }
 
@@ -129,8 +131,8 @@ public partial class LevelDirector : Node2D
         _dialog.AddChild(dim);
 
         var panel = new Panel();
-        panel.Position = new Vector2(220f, 108f);
-        panel.Size = new Vector2(520f, 324f);
+        panel.Position = new Vector2(210f, 96f);
+        panel.Size = new Vector2(540f, 368f);
         var ps = new StyleBoxFlat();
         ps.BgColor = new Color(0.08f, 0.06f, 0.12f, 0.96f);
         ps.BorderColor = new Color(1f, 0.85f, 0.25f, 0.95f);
@@ -143,7 +145,7 @@ public partial class LevelDirector : Node2D
         // vbox 是 panel 的子节点：Position/Size 必须相对 panel（左上角原点）。
         // 之前写成屏幕绝对坐标(250,138)，导致整体被推到右下角、溢出面板。
         vbox.Position = new Vector2(30f, 30f);
-        vbox.Size = new Vector2(460f, 264f);
+        vbox.Size = new Vector2(480f, 308f);
         vbox.AddThemeConstantOverride("separation", 16);
         panel.AddChild(vbox);
 
@@ -213,6 +215,15 @@ public partial class LevelDirector : Node2D
         GetTree().ReloadCurrentScene();
     }
 
+    /// <summary>返回标题界面：必须先把暂停解除，否则标题界面会继承暂停状态。</summary>
+    private void OnReturnToTitle()
+    {
+        if (!_ended) return;
+        _ended = false;
+        GetTree().Paused = false;
+        GetTree().ChangeSceneToFile("res://Scenes/Title.tscn");
+    }
+
     public override void _UnhandledInput(InputEvent @event)
     {
         if (!_ended) return;
@@ -221,5 +232,7 @@ public partial class LevelDirector : Node2D
             OnRestart();
         else if ((key.Keycode == Key.Enter || key.Keycode == Key.KpEnter || key.Keycode == Key.N) && _canNext)
             OnNext();
+        else if (key.Keycode == Key.T)
+            OnReturnToTitle();
     }
 }

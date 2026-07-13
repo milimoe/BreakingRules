@@ -23,6 +23,7 @@ public partial class RuleObject : Node2D
     private const int BandW = 240;
     private const int BandH = 48;
     private const float FollowDuration = 6f;   // 跟随规则的跟随时长（秒），到点后区域定格
+    private const float GlobalDuration = 10f;  // 全图规则的持续时长（秒），到点后规则整体消失
 
     [Export] public float StrikeRange { get; set; } = 120f;
     [Export] public Vector2 ZoneSize { get; set; } = new Vector2(160f, 90f);
@@ -36,9 +37,11 @@ public partial class RuleObject : Node2D
     private Sprite2D _band;
     private Sprite2D _zoneVisual;
     private Label _countdown;       // 跟随规则的区域倒计时
+    private Label _globalCountdown; // 全图规则的剩余时长倒计时
     private Vector2 _zoneOffset;
     private Tween _bobTween;        // 飘动 tween（无限循环）；划除后须先 Kill 再释放目标节点
     private float _followRemaining; // 跟随剩余时长
+    private float _globalRemaining; // 全图剩余时长
 
     public override void _Ready()
     {
@@ -82,6 +85,20 @@ public partial class RuleObject : Node2D
             AddChild(_countdown);
         }
 
+        // 全图规则：条文顶部显示剩余时长倒计时（最多 GlobalDuration 秒后规则整体消失）
+        if (IsGlobal)
+        {
+            _globalRemaining = GlobalDuration;
+            _globalCountdown = new Label();
+            _globalCountdown.AddThemeFontSizeOverride("font_size", 18);
+            _globalCountdown.HorizontalAlignment = HorizontalAlignment.Center;
+            _globalCountdown.Size = new Vector2(80f, 24f);
+            _globalCountdown.Position = new Vector2(-40f, -BandH / 2f - 26f);
+            _globalCountdown.Modulate = new Color(1f, 0.85f, 0.3f);
+            _globalCountdown.Text = $"{Mathf.Ceil(_globalRemaining)}";
+            AddChild(_globalCountdown);
+        }
+
         // 上下飘动（无限循环）。注意：本节点被划除时会释放 _bandRoot，
         // 必须在释放前 Kill 此 tween，否则无限循环 tween 的目标失效后
         // total_time==0 + loops==-1 触发 Godot "Infinite loop detected"。
@@ -93,6 +110,19 @@ public partial class RuleObject : Node2D
 
     public override void _PhysicsProcess(double delta)
     {
+        // 全图规则倒计时：到点后规则整体（全图效果 + 局部消除区）一起消失
+        if (IsGlobal && _globalRemaining > 0f)
+        {
+            _globalRemaining -= (float)delta;
+            if (_globalCountdown != null)
+                _globalCountdown.Text = $"{Mathf.Ceil(Mathf.Max(0f, _globalRemaining))}";
+            if (_globalRemaining <= 0f)
+            {
+                QueueFree();
+                return;
+            }
+        }
+
         // 跟随规则：区域以约 1 秒延迟平滑追向玩家；倒计时归零后定格（不再跟随）。
         if (Follow && _followRemaining > 0f)
         {
@@ -155,6 +185,7 @@ public partial class RuleObject : Node2D
         Follow = false;    // 消除后停止跟随
         IsGlobal = false;  // 消除后不再全图生效（变为局部弹簧）
         if (_countdown != null) _countdown.Visible = false;
+        if (_globalCountdown != null) _globalCountdown.Visible = false;
 
         Mode = RuleMode.Spring;
         _zoneVisual.Modulate = new Color(1f, 0.85f, 0.2f, 0.45f); // 黄

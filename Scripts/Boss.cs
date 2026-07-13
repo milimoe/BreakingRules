@@ -66,10 +66,10 @@ public partial class Boss : CharacterBody2D
     private bool _grabActive;           // 投技进行中（防止重入）
     private CancellationTokenSource _gcts;  // 投技独立取消源（死亡/场景切换取消）
 
-    // 候选规则类型（随机抽一条）
+    // 候选基础规则类型（随机抽一条；【左右反转】仅在全图规则路径中独立出现）
     private static readonly RuleMode[] RuleTypes =
     {
-        RuleMode.NoJump, RuleMode.NoAttack, RuleMode.NoStrike, RuleMode.Slow
+        RuleMode.NoJump, RuleMode.NoAttack, RuleMode.Slow
     };
     // 可站立表面（top=碰撞顶面 Y，xMin/xMax=该表面可落点的 x 范围）
     private static readonly (float top, float xMin, float xMax)[] Surfaces =
@@ -116,16 +116,38 @@ public partial class Boss : CharacterBody2D
         if (_target == null) return;
         float d = (float)delta;
 
-        // 生成条文：随机类型 + 随机表面 + 随机 x → 散布到竞技场各处
+        // 生成条文：随机类型 + 随机表面 + 随机 x → 散布到竞技场各处。
+        // 第 2 关起基础规则可能升级为全图规则（含专门的【左右反转】）；第 3 关起可能跟随玩家。
         _spawnTimer -= d;
         if (_spawnTimer <= 0f)
         {
             _spawnTimer = SpawnInterval;
-            var mode = RuleTypes[(int)GD.RandRange(0f, RuleTypes.Length - 1f)];
+            int stage = RunState.Instance != null ? RunState.Instance.CurrentStage : 0;
+            bool canGlobal = stage >= 1;   // 第 2 关起：基础规则可能升级为全图
+            bool canFollow = stage >= 2;   // 第 3 关起：基础规则区域可能跟随玩家
+
+            RuleMode mode;
+            bool isGlobal = false;
+            bool follow = false;
+
+            if (canGlobal && GD.Randf() < 0.4f)
+            {
+                // 全图规则：小概率专门的【左右反转】，否则基础规则升级为全图
+                if (GD.Randf() < 0.3f) mode = RuleMode.Invert;
+                else mode = RuleTypes[(int)GD.RandRange(0f, RuleTypes.Length - 1f)];
+                isGlobal = true;
+            }
+            else
+            {
+                mode = RuleTypes[(int)GD.RandRange(0f, RuleTypes.Length - 1f)];
+                if (canFollow && GD.Randf() < 0.35f) follow = true;
+            }
+            if (mode == RuleMode.Invert) isGlobal = true; // 左右反转本质即全图
+
             var s = Surfaces[(int)GD.RandRange(0f, Surfaces.Length - 1f)];
             float x = (float)GD.RandRange(s.xMin, s.xMax);
             Shout(ShoutFor(mode));
-            RuleManager.Instance?.SpawnRule(mode, new Vector2(x, s.top - 52f));
+            RuleManager.Instance?.SpawnRule(mode, new Vector2(x, s.top - 52f), isGlobal, follow);
         }
 
         if (_attackActive)
@@ -594,8 +616,8 @@ public partial class Boss : CharacterBody2D
     {
         RuleMode.NoJump   => "禁跳！",
         RuleMode.NoAttack => "禁武！",
-        RuleMode.NoStrike => "禁改！",
         RuleMode.Slow     => "限速！",
+        RuleMode.Invert   => "反转！",
         _                 => "条文！",
     };
 

@@ -27,7 +27,7 @@ anchor_bottom = 0.0
 offset_left = -320.0
 offset_top = 12.0
 offset_right = -12.0
-offset_bottom = 312.0
+offset_bottom = 338.0
 theme_override_styles/panel = SubResource("StyleBoxFlat_1")
 script = ExtResource("Script_1")
 
@@ -78,7 +78,7 @@ text = "攻击 Boss：J / 空格"
 [node name="Strike" type="Label" parent="VBox/Content"]
 layout_mode = 2
 theme_override_font_sizes/font_size = 14
-text = "划除条文（5秒冷却）：Q"
+text = "划除条文（长按 Q 约1秒，任意键取消；5秒冷却）"
 
 [node name="Guard" type="Label" parent="VBox/Content"]
 layout_mode = 2
@@ -100,6 +100,13 @@ text = "护盾：3 青色护盾（3秒无敌，可挡投技）"
 layout_mode = 2
 theme_override_font_sizes/font_size = 14
 text = "治愈：4 自我治愈（+2 HP）"
+
+[node name="Rule" type="Label" parent="VBox/Content"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+modulate = Color(0.7, 0.75, 0.95, 0.85)
+autowrap_mode = 1
+text = "规则条文：可能全图生效或跟随你（标注【全图】/【跟随】）。走到消除区长按 Q 划除。"
 
 [node name="Meta" type="Label" parent="VBox/Content"]
 layout_mode = 2

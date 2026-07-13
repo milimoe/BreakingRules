@@ -13,7 +13,7 @@ public partial class Controls : Panel
     // 但 C# 静态字段在同一进程内不随场景重载重置，故用它持久化折叠偏好。
     private static bool _savedExpanded = true;
     private bool _expanded;
-    private const float ExpandedBottom = 312f;   // 展开时面板下边（offset_bottom 值），容纳 9 行操作明细
+    private const float ExpandedBottom = 338f;   // 展开时面板下边（offset_bottom 值），容纳 10 行操作明细
     private const float CollapsedBottom = 52f;    // 收起时仅留标题栏高度（含 content_margin，避免裁切标题）
 
     private VBoxContainer _content;

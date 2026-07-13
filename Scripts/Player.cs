@@ -47,6 +47,13 @@ public partial class Player : CharacterBody2D
     private Sprite2D _shield3;   // 青色护盾（技能3）：3秒无敌，独立子节点避免与 modulate 闪烁冲突
     private float _shieldTimer;  // 青色护盾剩余无敌时间
     private bool _frozen;        // 投技窒息期间冻结输入/物理（非树暂停，滤镜动画照常）
+
+    // 划除（Q）长按蓄力机制
+    private bool _striking;          // 是否正在长按蓄力
+    private float _strikeProgress;   // 蓄力进度（秒）
+    private const float StrikeChargeTime = 1f;  // 长按约 1 秒完成
+    private Node2D _strikeBar;       // 角色下方蓄力进度条容器
+    private Sprite2D _strikeFill;    // 进度条填充（左对齐增长）
     private bool _attacking;
     private int _hp;
     private float _invuln;
@@ -79,6 +86,19 @@ public partial class Player : CharacterBody2D
         _shield3.Modulate = new Color(0.3f, 1f, 0.95f, 0.4f);
         _shield3.Visible = false;
         AddChild(_shield3);
+        // 划除蓄力进度条（长按 Q 时显示于角色下方）
+        _strikeBar = new Node2D();
+        var barBg = new Sprite2D();
+        barBg.Texture = Util.Square(60, 8, new Color(0.15f, 0.15f, 0.15f, 0.85f));
+        barBg.Position = new Vector2(0f, 34f);
+        _strikeBar.AddChild(barBg);
+        _strikeFill = new Sprite2D();
+        _strikeFill.Texture = Util.Square(60, 8, new Color(0.3f, 1f, 0.95f));
+        _strikeFill.Centered = false;
+        _strikeFill.Position = new Vector2(-30f, 30f);   // 左上角对齐 bg 左缘
+        _strikeBar.AddChild(_strikeFill);
+        _strikeBar.Visible = false;
+        AddChild(_strikeBar);
         _camera = GetNode<Camera2D>("Camera2D");
         // 单屏竞技场：把相机限位框设为整个 960x540 场地。
         // 视口尺寸正好等于限位框 -> 相机被锁死、静止不滚动。
@@ -126,6 +146,9 @@ public partial class Player : CharacterBody2D
                 if (IsInstanceValid(r) && r.Mode == RuleMode.Slow && r.Contains(GlobalPosition))
                 { spd *= 0.4f; break; }
         }
+        // 左右反转全图规则：翻转水平输入（按 A 往右、按 D 往左），朝向同步翻转
+        if (RuleManager.Instance != null && RuleManager.Instance.Inverted) dir = -dir;
+
         Velocity = new Vector2(dir * spd, Velocity.Y);
 
         // 弹簧区：接触即弹飞
@@ -180,9 +203,27 @@ public partial class Player : CharacterBody2D
             }
         }
 
-        // 划除条文（Q）；防御中不可划除（同样属于主动输出）
-        if (Input.IsActionJustPressed("strike") && !guarding)
-            TryStrike();
+        // 划除条文（Q）：长按约 1 秒释放；期间按任意其他键或提前松手=取消（不进 CD），完成才进 CD。
+        // Q 现已可在任意位置释放（不再受区域/禁改限制）。
+        if (_striking)
+        {
+            if (!Input.IsActionPressed("strike") || OtherKeyPressed())
+                CancelStrike();
+            else
+            {
+                _strikeProgress += d;
+                if (_strikeFill != null)
+                    _strikeFill.Scale = new Vector2(Mathf.Clamp(_strikeProgress / StrikeChargeTime, 0f, 1f), 1f);
+                if (_strikeProgress >= StrikeChargeTime) CompleteStrike();
+            }
+        }
+        else if (_qCd <= 0f && !guarding && Input.IsActionJustPressed("strike"))
+        {
+            _striking = true;
+            _strikeProgress = 0f;
+            if (_strikeBar != null) _strikeBar.Visible = true;
+            if (_strikeFill != null) _strikeFill.Scale = new Vector2(0f, 1f);
+        }
 
         // 技能（数字键 1 / 2）：CD 制。空格同时触发跳+攻击，故技能独立键避免误触。
         _cd1 = Mathf.Max(0f, _cd1 - d);
@@ -275,24 +316,14 @@ public partial class Player : CharacterBody2D
         }
     }
 
-    private void TryStrike()
+    /// <summary>长按 Q 完成：划除最近的可划除规则（任意类型，不再受区域/禁改限制），触发反转 + 真空期。</summary>
+    private void CompleteStrike()
     {
+        _striking = false;
+        if (_strikeBar != null) _strikeBar.Visible = false;
+        _qCd = QCd;   // 完成才进 CD；取消不进 CD
         if (RuleManager.Instance == null) return;
-        if (_qCd > 0f) { ShowPopup("冷却中", Colors.Gray); return; }
-
-        // 禁改区：区内按 Q 划除 = 违规（可从区外边缘划掉该区本身）
-        bool inNoStrike = RuleManager.Instance.ActiveRules.Any(r => IsInstanceValid(r) &&
-            r.Mode == RuleMode.NoStrike && r.Contains(GlobalPosition));
-        if (inNoStrike)
-        {
-            if (_invuln <= 0) TakeDamage(1);
-            ShowPopup("违规！", Colors.Red);
-            Shake();
-            RuleManager.Instance?.PlaySFX("violation");
-            return;
-        }
-
-        // 划除任意非 Spring 条文（不限禁跳区），最近且进入划除范围者优先
+        // 就近划除任意非 Spring 条文（全图/跟随规则均可在其消除区附近划除）
         RuleObject nearest = null;
         float best = float.MaxValue;
         foreach (var r in RuleManager.Instance.ActiveRules)
@@ -303,15 +334,30 @@ public partial class Player : CharacterBody2D
             if (dist < best) { best = dist; nearest = r; }
         }
         if (nearest == null) return;
-
-        _qCd = QCd; // 进入 5 秒冷却（无次数限制）
-        // 红色划痕瞬间
         var slash = CreateTween();
         slash.TweenProperty(_sprite, "modulate", Colors.Red, 0.06f);
         slash.TweenProperty(_sprite, "modulate", Colors.White, 0.12f);
         Shake();
         RuleManager.Instance.PlaySFX("paper_tear");
         RuleManager.Instance.StrikeRule(nearest);
+    }
+
+    private void CancelStrike()
+    {
+        _striking = false;
+        if (_strikeBar != null) _strikeBar.Visible = false;
+        // 取消不进 CD
+    }
+
+    /// <summary>长按蓄力期间是否按下了「其他」键（任意其他键取消划除）。</summary>
+    private static bool OtherKeyPressed()
+    {
+        return Input.IsActionJustPressed("move_left") || Input.IsActionJustPressed("move_right") ||
+               Input.IsActionJustPressed("move_up") || Input.IsActionJustPressed("move_down") ||
+               Input.IsActionJustPressed("jump") || Input.IsActionJustPressed("attack") ||
+               Input.IsActionJustPressed("guard") ||
+               Input.IsActionJustPressed("skill1") || Input.IsActionJustPressed("skill2") ||
+               Input.IsActionJustPressed("skill3") || Input.IsActionJustPressed("skill4");
     }
 
     // ---------- 技能系统 ----------

@@ -1,5 +1,6 @@
 using Godot;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace BreakingRules;
 
@@ -76,8 +77,12 @@ public partial class RuleManager : Node
     public float AttackMult => _isVacuum ? AttackMultVacuum : 1f;
     public float SpeedMult => _isVacuum ? SpeedMultVacuum : 1f;
 
-    /// <summary>Boss 调用：在 anchor 处生成一条指定类型的「规则条文」（场上已达上限则忽略）。</summary>
-    public void SpawnRule(RuleMode mode, Vector2 anchor)
+    /// <summary>场上是否存在【左右反转】全图规则（用于翻转玩家左右输入）。</summary>
+    public bool Inverted => _active.Any(r => IsInstanceValid(r) && r.Mode == RuleMode.Invert);
+
+    /// <summary>Boss 调用：在 anchor 处生成一条指定类型的「规则条文」（场上已达上限则忽略）。
+    /// isGlobal=全图规则（约束全图生效）；follow=区域跟随玩家（约 1s 延迟）。区域尺寸随机。</summary>
+    public void SpawnRule(RuleMode mode, Vector2 anchor, bool isGlobal = false, bool follow = false)
     {
         if (_active.Count >= MaxActiveRules) return;
         var scene = GD.Load<PackedScene>("res://Scenes/RuleObject.tscn");
@@ -86,6 +91,12 @@ public partial class RuleManager : Node
         obj.GlobalPosition = anchor;
         obj.RuleIndex = _active.Count + 1;
         obj.Mode = mode;
+        // 区域大小动态变化（合理范围：比基准 160x90 可大可小）
+        float w = (float)GD.RandRange(110f, 260f);
+        float h = (float)GD.RandRange(72f, 150f);
+        obj.ZoneSize = new Vector2(w, h);
+        obj.IsGlobal = isGlobal;
+        obj.Follow = follow;
         GetTree().CurrentScene.AddChild(obj);
         _active.Add(obj);
         obj.TreeExiting += () => _active.Remove(obj);

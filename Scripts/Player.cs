@@ -140,14 +140,17 @@ public partial class Player : CharacterBody2D
         // 水平移动（防御中禁止移动，把输入归零；真空期×2，叠加拾取加速；限速区内移速大幅降低）
         float dir = guarding ? 0f : Input.GetAxis("move_left", "move_right");
         float spd = Speed * (RuleManager.Instance != null ? RuleManager.Instance.SpeedMult : 1f) * _speedBuff;
-        if (RuleManager.Instance != null)
+        // 青色护盾激活期间：无视一切限制规则（含全图/跟随规则），行动不受约束、不掉血
+        bool shield = IsShieldActive();
+        if (RuleManager.Instance != null && !shield)
         {
             foreach (var r in RuleManager.Instance.ActiveRules)
                 if (IsInstanceValid(r) && r.Mode == RuleMode.Slow && r.Contains(GlobalPosition))
                 { spd *= 0.4f; break; }
         }
         // 左右反转全图规则：翻转水平输入（按 A 往右、按 D 往左），朝向同步翻转
-        if (RuleManager.Instance != null && RuleManager.Instance.Inverted) dir = -dir;
+        // 护盾期间免疫反转，保持正常左右操作
+        if (!shield && RuleManager.Instance != null && RuleManager.Instance.Inverted) dir = -dir;
 
         Velocity = new Vector2(dir * spd, Velocity.Y);
 
@@ -165,7 +168,8 @@ public partial class Player : CharacterBody2D
         // 跳跃 / 违规判定（防御中禁止起跳：防御=扎根，不能借跳位移）
         if (Input.IsActionJustPressed("jump") && !guarding)
         {
-            bool inNoJump = RuleManager.Instance != null &&
+            // 护盾期间无视禁跳规则，可正常起跳（不取消、不惩罚）
+            bool inNoJump = !shield && RuleManager.Instance != null &&
                 RuleManager.Instance.ActiveRules.Any(r => IsInstanceValid(r) &&
                     r.Mode == RuleMode.NoJump && r.Contains(GlobalPosition));
             if (inNoJump)
@@ -187,7 +191,8 @@ public partial class Player : CharacterBody2D
         if (Input.IsActionPressed("attack") && _attackCd <= 0f && !guarding)
         {
             _attackCd = AttackCooldown;
-            bool inNoAttack = RuleManager.Instance != null &&
+            // 护盾期间无视禁武规则，可正常攻击（不惩罚）
+            bool inNoAttack = !shield && RuleManager.Instance != null &&
                 RuleManager.Instance.ActiveRules.Any(r => IsInstanceValid(r) &&
                     r.Mode == RuleMode.NoAttack && r.Contains(GlobalPosition));
             if (inNoAttack)

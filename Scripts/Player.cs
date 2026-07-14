@@ -40,6 +40,7 @@ public partial class Player : CharacterBody2D
     private const float Skill2Range = 320f;  // 射线命中：以角色为中心的半径
     public int SkillPoints { get; private set; }
     public const int SkillCount = 4;
+    public const int SkillMax = 10;     // 技能点上限
 
     private AnimatedSprite2D _sprite;
     private Camera2D _camera;
@@ -69,7 +70,18 @@ public partial class Player : CharacterBody2D
 
     public override void _Ready()
     {
-        _hp = MaxHp;
+        // 跨关继承：进入下一关时携带上一关的当前生命与技能点；
+        // 新开局 / 重新开始由 RunState.Carry=false 走默认（满血、0 技能点）。
+        if (RunState.Instance != null && RunState.Instance.Carry)
+        {
+            _hp = Mathf.Min(RunState.Instance.CarryHp, MaxHp);
+            SkillPoints = Mathf.Min(RunState.Instance.CarrySkill, SkillMax);
+        }
+        else
+        {
+            _hp = MaxHp;
+            SkillPoints = 0;
+        }
         _sprite = GetNode<AnimatedSprite2D>("Sprite");
         SetupPlayerAnimation();
         _sprite.Scale = new Vector2(BaseScale, BaseScale);
@@ -109,6 +121,8 @@ public partial class Player : CharacterBody2D
         _camera.LimitRight = 960;
         _camera.LimitBottom = 540;
         AddToGroup("player");
+        // 通知 HUD 同步初始生命（含跨关继承值）；HUD 若尚未订阅则直接读取 _player.Hp 也能得到正确值
+        EmitSignal(SignalName.HealthChanged, _hp, MaxHp);
     }
 
     public override void _PhysicsProcess(double delta)
@@ -183,6 +197,7 @@ public partial class Player : CharacterBody2D
             else if (IsOnFloor())
             {
                 Velocity = new Vector2(Velocity.X, JumpVelocity * _jumpBuff);
+                RuleManager.Instance?.PlaySFX("jump");
             }
         }
 
@@ -260,6 +275,7 @@ public partial class Player : CharacterBody2D
 
     private void Swing()
     {
+        RuleManager.Instance?.PlaySFX("attack");
         // 触发攻击动画（单次、稍快）；结束由 OnAnimFinished 复位
         _attacking = true;
         _sprite.Play("attack");
@@ -351,6 +367,7 @@ public partial class Player : CharacterBody2D
     {
         _striking = false;
         if (_strikeBar != null) _strikeBar.Visible = false;
+        RuleManager.Instance?.PlaySFX("cancel"); // 取消蓄力给一点反馈
         // 取消不进 CD
     }
 
@@ -455,6 +472,7 @@ public partial class Player : CharacterBody2D
     /// <summary>地图拾取物增益：加速 / 跳跃↑ / 回血。由 Pickup 调用。</summary>
     public void ApplyPickup(string kind)
     {
+        RuleManager.Instance?.PlaySFX("pickup");
         switch (kind)
         {
             case "Speed":
@@ -474,7 +492,7 @@ public partial class Player : CharacterBody2D
     }
 
     /// <summary>捡起技能宝珠后调用：技能点 +1（HUD 技能条显示）。</summary>
-    public void AddSkillPoint() => SkillPoints++;
+    public void AddSkillPoint() => SkillPoints = Mathf.Min(SkillMax, SkillPoints + 1);
 
     public void TakeDamage(int amount)
     {
@@ -501,6 +519,7 @@ public partial class Player : CharacterBody2D
         if (IsGuarding) { OnGuardBlock(); return; }   // 防御优先：无视无敌帧，按住 S 即生效
         if (_invuln > 0f) return;
         _hp -= amount;
+        RuleManager.Instance?.PlaySFX("player_hurt");
         EmitSignal(SignalName.HealthChanged, _hp, MaxHp);
         if (_hp <= 0)
         {
@@ -537,6 +556,7 @@ public partial class Player : CharacterBody2D
         if (IsShieldActive()) { OnShieldBlock(); return; }
         if (_hp <= 0) return;
         _hp -= amount;
+        RuleManager.Instance?.PlaySFX("player_hurt");
         EmitSignal(SignalName.HealthChanged, _hp, MaxHp);
         if (_hp <= 0) { EmitSignal(SignalName.Died); return; }
         _invuln = 0.5f;

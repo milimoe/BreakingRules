@@ -190,8 +190,7 @@ public partial class Hud : Control
     {
         if (_player == null) return;
         int n = _player.SkillPoints;
-        int shown = Mathf.Min(n, 10);
-        _skillLabel.Text = n == 0 ? "技能 ✨ 0" : "技能 " + new string('✨', shown) + $" {n}";
+        _skillLabel.Text = $"技能 ✨ {n}/10";   // 技能点上限 10，显示 (x/10)
         // 槽 0 = Q（5s CD），槽 1~4 = 技能 1~4
         UpdateSlot(0, _player.IsQReady, _player.QSkillCd, _player.QSkillCdMax);
         UpdateSlot(1, _player.IsSkillReady(1), _player.SkillCd(1), _player.SkillCdMax(1));

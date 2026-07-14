@@ -13,6 +13,8 @@ public partial class LevelDirector : Node2D
     private VBoxContainer _dlgButtons;
     private bool _ended;
     private bool _canNext;
+    private CanvasLayer _pauseLayer;   // ESC 暂停对话框（独立层，与胜负对话框区分）
+    private bool _paused;
 
     public override void _Ready()
     {
@@ -33,9 +35,9 @@ public partial class LevelDirector : Node2D
         CallDeferred(nameof(BuildTerrain));
         CallDeferred(nameof(SpawnBoss));
         BuildDialog();
-
-        // 进入战斗即开始循环 BGM（返回标题时由 OnReturnToTitle 停止）
-        RuleManager.Instance?.StartBGM();
+        BuildPauseDialog();
+        // 注意：BGM 由 RuleManager 在游戏启动即全局循环播放（跨场景续播、暂停也不断），
+        // 此处不再单独启停。
     }
 
     private void BuildTerrain()
@@ -178,6 +180,91 @@ public partial class LevelDirector : Node2D
         _dialog.Visible = false;
     }
 
+    // ---------- ESC 暂停（游戏中） ----------
+    private void BuildPauseDialog()
+    {
+        _pauseLayer = new CanvasLayer();
+        _pauseLayer.Layer = 25; // 高于游戏、低于胜负对话框(20) ；二者不会同时出现
+        _pauseLayer.ProcessMode = Node.ProcessModeEnum.Always; // 暂停时仍可交互
+        AddChild(_pauseLayer);
+
+        var dim = new ColorRect();
+        dim.Color = new Color(0f, 0f, 0f, 0.62f);
+        dim.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+        dim.MouseFilter = Control.MouseFilterEnum.Stop; // 吞掉点击，避免穿透到游戏
+        _pauseLayer.AddChild(dim);
+
+        var panel = new Panel();
+        panel.Position = new Vector2(300f, 145f);  // 垂直居中：(540-250)/2
+        panel.Size = new Vector2(360f, 250f);      // 加高以容纳标题 + 两个按钮，避免第二按钮溢出底部
+        var ps = new StyleBoxFlat();
+        ps.BgColor = new Color(0.08f, 0.06f, 0.12f, 0.96f);
+        ps.BorderColor = new Color(1f, 0.85f, 0.25f, 0.95f);
+        ps.BorderWidthLeft = ps.BorderWidthTop = ps.BorderWidthRight = ps.BorderWidthBottom = 4;
+        panel.AddThemeStyleboxOverride("panel", ps);
+        panel.MouseFilter = Control.MouseFilterEnum.Stop;
+        _pauseLayer.AddChild(panel);
+
+        var vbox = new VBoxContainer();
+        // vbox 相对 panel（左上角原点）
+        vbox.Position = new Vector2(50f, 40f);
+        vbox.Size = new Vector2(260f, 170f);   // 高于内容最小高度(~165)，留足底部余量
+        vbox.AddThemeConstantOverride("separation", 16);
+        panel.AddChild(vbox);
+
+        var title = new Label();
+        title.Text = "暂停";
+        title.HorizontalAlignment = HorizontalAlignment.Center;
+        title.AddThemeFontSizeOverride("font_size", 28);
+        title.Modulate = new Color(1f, 0.9f, 0.5f);
+        vbox.AddChild(title);
+
+        var resume = new Button();
+        resume.Text = "返回游戏  (Esc)";
+        resume.CustomMinimumSize = new Vector2(260f, 46f);
+        resume.AddThemeFontSizeOverride("font_size", 18);
+        resume.Alignment = HorizontalAlignment.Center;
+        resume.ProcessMode = Node.ProcessModeEnum.Always; // 暂停时按钮可点
+        resume.FocusMode = Control.FocusModeEnum.None;     // 键盘不自动激活按钮，ESC 仍可触发
+        resume.Pressed += ResumeGame;
+        WireButtonSfx(resume);
+        vbox.AddChild(resume);
+
+        var toTitle = new Button();
+        toTitle.Text = "返回标题";
+        toTitle.CustomMinimumSize = new Vector2(260f, 46f);
+        toTitle.AddThemeFontSizeOverride("font_size", 18);
+        toTitle.Alignment = HorizontalAlignment.Center;
+        toTitle.ProcessMode = Node.ProcessModeEnum.Always;
+        toTitle.FocusMode = Control.FocusModeEnum.None;
+        toTitle.Pressed += OnReturnToTitle;
+        WireButtonSfx(toTitle);
+        vbox.AddChild(toTitle);
+
+        _pauseLayer.Visible = false;
+    }
+
+    /// <summary>给按钮接上悬停 / 点击提示音（触碰播放 ui_hover，按下播放 ui_click）。</summary>
+    private static void WireButtonSfx(Button btn)
+    {
+        btn.MouseEntered += () => RuleManager.Instance?.PlaySFX("ui_hover");
+        btn.Pressed += () => RuleManager.Instance?.PlaySFX("ui_click");
+    }
+
+    private void PauseGame()
+    {
+        _paused = true;
+        GetTree().Paused = true; // 冻结游戏（BGM 因 Always 仍播放）
+        _pauseLayer.Visible = true;
+    }
+
+    private void ResumeGame()
+    {
+        _paused = false;
+        GetTree().Paused = false;
+        _pauseLayer.Visible = false;
+    }
+
     private void ShowDialog(string title, string stats, params (string label, Action action)[] buttons)
     {
         _dlgTitle.Text = title;
@@ -195,6 +282,7 @@ public partial class LevelDirector : Node2D
             btn.ProcessMode = Node.ProcessModeEnum.Always; // 暂停时按钮可点
             btn.FocusMode = Control.FocusModeEnum.None;     // 键盘不自动激活按钮，避免与下方快捷键重复触发
             btn.Pressed += () => act();
+            WireButtonSfx(btn);
             _dlgButtons.AddChild(btn);
         }
         _dialog.Visible = true;
@@ -204,6 +292,14 @@ public partial class LevelDirector : Node2D
     {
         if (!_ended) return;
         _ended = false;
+        // 跨关继承：先暂存当前玩家生命与技能点，重载后 Player._Ready 据此恢复
+        // （不回复生命、不清空技能点；重新开始 / 新开局才会清零）
+        if (_player != null && RunState.Instance != null)
+        {
+            RunState.Instance.CarryHp = _player.Hp;
+            RunState.Instance.CarrySkill = _player.SkillPoints;
+            RunState.Instance.Carry = true;
+        }
         if (RunState.Instance != null) RunState.Instance.CurrentStage++;
         GetTree().Paused = false; // 重开/下一关前必须解除暂停
         GetTree().ReloadCurrentScene();
@@ -218,25 +314,39 @@ public partial class LevelDirector : Node2D
         GetTree().ReloadCurrentScene();
     }
 
-    /// <summary>返回标题界面：必须先把暂停解除，否则标题界面会继承暂停状态。</summary>
+    /// <summary>返回标题界面：先解除暂停（ESC 暂停或胜负暂停均可能处于 Paused），
+    /// 否则标题界面会继承暂停状态。BGM 为全局循环，不在此停止。</summary>
     private void OnReturnToTitle()
     {
-        if (!_ended) return;
         _ended = false;
-        RuleManager.Instance?.StopBGM();   // 切到标题前先停 BGM，避免 Autoload 跨场景续播
+        _paused = false;
+        if (_pauseLayer != null) _pauseLayer.Visible = false;
         GetTree().Paused = false;
         GetTree().ChangeSceneToFile("res://Scenes/Title.tscn");
     }
 
     public override void _UnhandledInput(InputEvent @event)
     {
-        if (!_ended) return;
-        if (@event is not InputEventKey key || !key.Pressed || key.Echo) return;
-        if (key.Keycode == Key.R)
-            OnRestart();
-        else if ((key.Keycode == Key.Enter || key.Keycode == Key.KpEnter || key.Keycode == Key.N) && _canNext)
-            OnNext();
-        else if (key.Keycode == Key.T)
-            OnReturnToTitle();
+        if (@event is InputEventKey key && key.Pressed && !key.Echo)
+        {
+            // 游戏中按 ESC：暂停；再按 ESC 默认返回游戏
+            if (key.Keycode == Key.Escape)
+            {
+                if (!_ended)
+                {
+                    if (_paused) ResumeGame();
+                    else PauseGame();
+                }
+                return; // ESC 不触发下方胜负快捷键
+            }
+
+            if (!_ended) return;
+            if (key.Keycode == Key.R)
+                OnRestart();
+            else if ((key.Keycode == Key.Enter || key.Keycode == Key.KpEnter || key.Keycode == Key.N) && _canNext)
+                OnNext();
+            else if (key.Keycode == Key.T)
+                OnReturnToTitle();
+        }
     }
 }

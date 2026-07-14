@@ -147,7 +147,15 @@ public partial class Title : Control
         btn.AddThemeColorOverride("font_hover_color", new Color(1f, 0.9f, 0.5f));
         btn.AddThemeColorOverride("font_pressed_color", new Color(1f, 0.95f, 0.7f));
         btn.Pressed += () => act();
+        WireButtonSfx(btn);
         return btn;
+    }
+
+    /// <summary>给按钮接上悬停 / 点击提示音（触碰播放 ui_hover，按下播放 ui_click）。</summary>
+    private static void WireButtonSfx(Button btn)
+    {
+        btn.MouseEntered += () => RuleManager.Instance?.PlaySFX("ui_hover");
+        btn.Pressed += () => RuleManager.Instance?.PlaySFX("ui_click");
     }
 
     private static StyleBoxFlat MakeBtnStyle(bool hover, bool pressed)
@@ -228,6 +236,7 @@ public partial class Title : Control
         close.AddThemeStyleboxOverride("normal", MakeBtnStyle(false, false));
         close.AddThemeStyleboxOverride("hover", MakeBtnStyle(true, false));
         close.AddThemeColorOverride("font_color", new Color(0.96f, 0.94f, 1f));
+        WireButtonSfx(close);
         close.Pressed += CloseRules;
         win.AddChild(close);
 

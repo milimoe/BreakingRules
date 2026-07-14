@@ -41,7 +41,7 @@ public partial class SkillDrop : Area2D
         if (body is Player p)
         {
             p.AddSkillPoint();
-            RuleManager.Instance?.PlaySFX("vacuum_start"); // 复用音效作反馈
+            RuleManager.Instance?.PlaySFX("orb"); // 技能宝珠拾取反馈
             QueueFree();
         }
     }

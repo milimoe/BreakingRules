@@ -487,6 +487,7 @@ public partial class Boss : CharacterBody2D
 
     private void SpawnBullet(Vector2 origin, Vector2 dir)
     {
+        RuleManager.Instance?.PlaySFX("bullet"); // 每发弹幕的发射反馈
         var b = new BossBullet();
         b.GlobalPosition = origin;
         b.Vel = dir * BulletSpeed;

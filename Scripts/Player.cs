@@ -381,16 +381,21 @@ public partial class Player : CharacterBody2D
         tween.TweenProperty(_sprite, "scale", Vector2.One * BaseScale, 0.08f);
 
         int dealt = ComputeAttackDamage(AttackPower);
+        bool hit = false;
         foreach (Node n in GetTree().GetNodesInGroup("boss"))
             if (n is Boss b && GlobalPosition.DistanceTo(b.GlobalPosition) < 84f)
             {
+                hit = true;
                 b.AddDespise();   // 蔑视之刃：普攻命中叠加蔑视
                 b.TakeDamage(dealt);
             }
-        // 普攻命中顿帧（0.05s）+ 双向轻震：模拟「受力」的打击感
-        Juice.Instance?.HitStop(0.05f);
-        Juice.Instance?.Shake(6f, 0.12f, Juice.ShakeAxis.Both);
-        GainEnergyForDamage(dealt);
+        // 仅在真正命中 Boss 时才有打击反馈与能量积累；对着空气空挥不做任何增益
+        if (hit)
+        {
+            GainEnergyForDamage(dealt);
+            Juice.Instance?.HitStop(0.05f);   // 普攻命中顿帧
+            Juice.Instance?.Shake(6f, 0.12f, Juice.ShakeAxis.Both);
+        }
     }
 
     /// <summary>统一计算一次玩家攻击的最终伤害：含真空期攻击倍率、伤口撒盐(+50%)、终审判决(血=1 时 +30%)。</summary>

@@ -22,7 +22,7 @@ public partial class RuleObject : Node2D
 {
     private const int BandW = 240;
     private const int BandH = 48;
-    private const float FollowDuration = 6f;   // 跟随规则的跟随时长（秒），到点后区域定格
+    private const float FollowDuration = 12f;   // 跟随规则的跟随时长（秒），到点后区域消失
     private const float GlobalDuration = 10f;  // 全图规则的持续时长（秒），到点后规则整体消失
 
     [Export] public float StrikeRange { get; set; } = 120f;

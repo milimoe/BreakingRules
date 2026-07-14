@@ -24,7 +24,7 @@ public partial class Boss : CharacterBody2D
     [Export] public float LungeDist { get; set; } = 220f;        // 扑击突进距离
     [Export] public float BulletDamage { get; set; } = 1f;
     [Export] public float BulletSpeed { get; set; } = 360f;
-    [Export] public int BulletCount { get; set; } = 10;
+    [Export] public int BulletCount { get; set; } = 6;
     [Export] public float BulletInterval { get; set; } = 0.6f;
     [Export] public float BeamRange { get; set; } = 320f;
     [Export] public float EnrageDuration { get; set; } = 10f;

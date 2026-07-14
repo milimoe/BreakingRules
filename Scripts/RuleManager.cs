@@ -48,12 +48,26 @@ public partial class RuleManager : Node
     };
     private readonly Dictionary<string, AudioStream> _sfxStreams = new();
 
+    // ---- BGM：独立的循环播放器（不希望被 SFX 打断）；默认 ProcessMode.Inherit，
+    //      树暂停（胜负对话框弹出）时自动停止，恢复后继续；返回标题时显式 Stop ----
+    private AudioStreamPlayer _bgm;
+    private AudioStream _bgmStream;
+    private const string BgmPath = "res://Assets/Sounds/bgm1.mp3";
+
     public override void _EnterTree()
     {
         Instance = this;
         _sfx = new AudioStreamPlayer();
         _sfx.ProcessMode = Node.ProcessModeEnum.Always; // 暂停游戏时胜利音效仍要播完
         AddChild(_sfx);
+        _bgm = new AudioStreamPlayer(); // 默认 ProcessMode.Inherit：树暂停时 BGM 自动停
+        AddChild(_bgm);
+        _bgmStream = GD.Load<AudioStream>(BgmPath);
+        if (_bgmStream != null)
+        {
+            _bgm.Stream = _bgmStream;
+            if (_bgmStream is AudioStreamMP3 mp3) mp3.Loop = true; // 循环播放
+        }
         foreach (var kv in _sfxPaths)
         {
             var s = GD.Load<AudioStream>(kv.Value);
@@ -159,6 +173,20 @@ public partial class RuleManager : Node
             _sfx.Stream = stream;
             _sfx.Play();
         }
+    }
+
+    /// <summary>开始循环播放 BGM（进入战斗时）。已在播放则跳过，避免关卡重开/下一关时叠加。</summary>
+    public void StartBGM()
+    {
+        if (_bgm == null || _bgmStream == null) return;
+        if (_bgm.Playing) return;
+        _bgm.Play();
+    }
+
+    /// <summary>停止 BGM（返回标题界面时调用，避免 Autoload 存活导致 BGM 跨场景继续播）。</summary>
+    public void StopBGM()
+    {
+        if (_bgm != null) _bgm.Stop();
     }
 
     /// <summary>在地图随机位置投放一个「技能宝珠」拾取物（捡起后获得技能点）。</summary>

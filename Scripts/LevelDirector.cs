@@ -33,6 +33,9 @@ public partial class LevelDirector : Node2D
         CallDeferred(nameof(BuildTerrain));
         CallDeferred(nameof(SpawnBoss));
         BuildDialog();
+
+        // 进入战斗即开始循环 BGM（返回标题时由 OnReturnToTitle 停止）
+        RuleManager.Instance?.StartBGM();
     }
 
     private void BuildTerrain()
@@ -220,6 +223,7 @@ public partial class LevelDirector : Node2D
     {
         if (!_ended) return;
         _ended = false;
+        RuleManager.Instance?.StopBGM();   // 切到标题前先停 BGM，避免 Autoload 跨场景续播
         GetTree().Paused = false;
         GetTree().ChangeSceneToFile("res://Scenes/Title.tscn");
     }

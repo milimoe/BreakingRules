@@ -102,6 +102,25 @@ public partial class RuleManager : Node
     public bool IsVacuum => _isVacuum;
     public float VacuumRemaining => _vacuumRemaining;
 
+    /// <summary>玩家是否处于某类规则区域内（用于「反诉」卡：玩家在禁攻/限速区内时 BOSS 也受限制）。</summary>
+    public bool PlayerInMode(RuleMode m)
+    {
+        var p = GetTree().GetFirstNodeInGroup("player") as Node2D;
+        if (p == null) return false;
+        foreach (var r in _active)
+            if (IsInstanceValid(r) && r.Mode == m && r.Contains(p.GlobalPosition))
+                return true;
+        return false;
+    }
+
+    /// <summary>清除场上所有规则条文（无罪推定卡：累计防御 10 次触发）。</summary>
+    public void ClearAllRules()
+    {
+        foreach (var r in _active.ToArray())
+            if (IsInstanceValid(r)) r.QueueFree();
+        _active.Clear();
+    }
+
     public float AttackMult => _isVacuum ? AttackMultVacuum : 1f;
     public float SpeedMult => _isVacuum ? SpeedMultVacuum : 1f;
 

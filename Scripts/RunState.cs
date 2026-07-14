@@ -1,4 +1,5 @@
 using Godot;
+using System.Collections.Generic;
 
 namespace BreakingRules;
 
@@ -22,6 +23,25 @@ public partial class RunState : Node
     public int CarryHp { get; set; }
     public int CarrySkill { get; set; }
     public bool Carry { get; set; }
+
+    // 能量条 / 大招跨关继承：进入下一关时携带上一关的「当前能量」与「所选大招」。
+    // 重新开始 / 新开局时 Carry=false，回退为 0 能量 + 默认大招。
+    public float CarryEnergy { get; set; }
+    public int CarryUlt { get; set; }
+
+    // 卡牌系统：一局之内（跨关）保留已获得的卡牌；新开局 / 重新开始清零。
+    // 第 3 关起每关开局 3 选 1，最多持有 5 张；选第 6 张时须替换一张（换掉的回卡池）。
+    public const int MaxCards = 5;
+    private readonly List<string> _ownedCards = new();
+    public IReadOnlyList<string> OwnedCards => _ownedCards;
+    public bool HasCard(string id) => _ownedCards.Contains(id);
+    public void AddCard(string id)
+    {
+        if (!_ownedCards.Contains(id) && _ownedCards.Count < MaxCards)
+            _ownedCards.Add(id);
+    }
+    public void RemoveCard(string id) => _ownedCards.Remove(id);
+    public void ClearCards() => _ownedCards.Clear();
 
     // 历史最高通关数（持久化到 user://，跨应用启动保留）
     public int BestClearCount { get; private set; }
@@ -50,6 +70,7 @@ public partial class RunState : Node
         ClearCount = 0;
         CurrentStage = 0;
         Carry = false;   // 新开局：不继承（满血、0 技能点）
+        ClearCards();    // 新开局：清空已获得卡牌
     }
 
     /// <summary>击败一个 BOSS：通关数 +1；若刷新纪录则立即落盘。</summary>

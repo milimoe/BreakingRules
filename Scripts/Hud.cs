@@ -18,6 +18,13 @@ public partial class Hud : Control
     private TextureRect[] _skillIcons = new TextureRect[5];
     private Label[] _skillCdLabels = new Label[5];
 
+    // 能量条 / 大招
+    private ProgressBar _energyBar;
+    private Label _energyLabel;
+    private TextureRect[] _ultIcons = new TextureRect[3];
+    private Panel[] _ultFrames = new Panel[3];
+    private Label[] _ultCdLabels = new Label[3];   // 大招冷却倒计时数字
+
     public override void _Ready()
     {
         _player = GetTree().GetFirstNodeInGroup("player") as Player;
@@ -70,11 +77,13 @@ public partial class Hud : Control
         AddChild(_goldFrame);
 
         _vacuum = new Label();
-        _vacuum.Position = new Vector2(12, 112);
+        _vacuum.Position = new Vector2(12, 134);
         _vacuum.AddThemeFontSizeOverride("font_size", 16);
         _vacuum.Modulate = new Color(1f, 0.85f, 0.2f);
         _vacuum.Visible = false;
         AddChild(_vacuum);
+
+        BuildEnergyUi();
 
         if (_player != null)
             _player.Connect(Player.SignalName.HealthChanged, Callable.From<int, int>(OnHealth));
@@ -186,6 +195,133 @@ public partial class Hud : Control
         }
     }
 
+    // ---------- 能量条 + 大招图标（技能栏下方） ----------
+    private void BuildEnergyUi()
+    {
+        _energyLabel = new Label();
+        _energyLabel.Position = new Vector2(12f, 110f);
+        _energyLabel.AddThemeFontSizeOverride("font_size", 15);
+        _energyLabel.Modulate = new Color(1f, 0.85f, 0.3f);
+        AddChild(_energyLabel);
+
+        _energyBar = new ProgressBar();
+        _energyBar.Position = new Vector2(96f, 112f);
+        _energyBar.Size = new Vector2(164f, 14f);
+        _energyBar.MaxValue = 50;
+        _energyBar.Value = 0;
+        _energyBar.ShowPercentage = false;
+        var efg = new StyleBoxFlat();
+        efg.BgColor = new Color(1f, 0.8f, 0.2f);
+        _energyBar.AddThemeStyleboxOverride("fill", efg);
+        AddChild(_energyBar);
+
+        // 「大招」小标题：位于能量条右侧、大招图标上方，提示该组图标的用途
+        var ultHeader = new Label();
+        ultHeader.Text = "大招";
+        ultHeader.Position = new Vector2(280f, 88f);
+        ultHeader.AddThemeFontSizeOverride("font_size", 13);
+        ultHeader.Modulate = Colors.Gold;
+        AddChild(ultHeader);
+
+        // 3 个大招图标（F 循环切换选中；能量满时高亮）
+        for (int i = 0; i < 3; i++)
+        {
+            var frame = new Panel();
+            frame.Position = new Vector2(280f + i * 52f, 104f);
+            frame.Size = new Vector2(46f, 46f);
+            var fs = new StyleBoxFlat();
+            fs.BgColor = new Color(0.1f, 0.1f, 0.15f, 0.35f);
+            fs.BorderColor = Colors.Gold;
+            fs.BorderWidthLeft = fs.BorderWidthTop = fs.BorderWidthRight = fs.BorderWidthBottom = 2;
+            frame.AddThemeStyleboxOverride("panel", fs);
+            AddChild(frame);
+            _ultFrames[i] = frame;
+
+            var icon = new TextureRect();
+            icon.Texture = MakeUltIcon(i);
+            icon.StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered;
+            icon.Position = new Vector2(4f, 2f);
+            icon.Size = new Vector2(38f, 34f);
+            frame.AddChild(icon);
+            _ultIcons[i] = icon;
+
+            var key = new Label();
+            key.Text = "F";
+            key.AddThemeFontSizeOverride("font_size", 12);
+            key.Position = new Vector2(2f, 30f);
+            key.Modulate = Colors.Gold;
+            frame.AddChild(key);
+
+            // 长按 E 释放提示（与「F 切换选中」并列，避免玩家不知道按什么释放）
+            var keyE = new Label();
+            keyE.Text = "E";
+            keyE.AddThemeFontSizeOverride("font_size", 12);
+            keyE.HorizontalAlignment = HorizontalAlignment.Right;
+            keyE.Position = new Vector2(0f, 30f);
+            keyE.Size = new Vector2(42f, 18f);
+            keyE.Modulate = Colors.Gold;
+            frame.AddChild(keyE);
+
+            var cd = new Label();
+            cd.AddThemeFontSizeOverride("font_size", 18);
+            cd.HorizontalAlignment = HorizontalAlignment.Center;
+            cd.VerticalAlignment = VerticalAlignment.Center;
+            cd.Position = new Vector2(0f, 0f);
+            cd.Size = new Vector2(46f, 46f);
+            cd.Modulate = Colors.White;
+            cd.Visible = false;
+            frame.AddChild(cd);
+            _ultCdLabels[i] = cd;
+        }
+    }
+
+    private ImageTexture MakeUltIcon(int kind)
+    {
+        int s = 32;
+        var img = Image.CreateEmpty(s, s, false, Image.Format.Rgba8);
+        img.Fill(new Color(0f, 0f, 0f, 0f));
+        Color col = kind switch
+        {
+            0 => new Color(1f, 0.85f, 0.2f),   // 乱刀斩：金
+            1 => new Color(0.5f, 0.9f, 1f),    // 闪现斩：蓝
+            _ => new Color(0.7f, 1f, 0.7f),    // 时间怀表：绿
+        };
+        if (kind == 0)  // 双斜杠（乱刀斩）
+        {
+            for (int t = 0; t <= 26; t++)
+            {
+                int x = (int)Mathf.Round(4f + t * 24f / 26f);
+                int y = (int)Mathf.Round(4f + t * 24f / 26f);
+                if (x >= 0 && x < s && y >= 0 && y < s) img.SetPixel(x, y, col);
+                int x2 = (int)Mathf.Round(28f - t * 24f / 26f);
+                int y2 = (int)Mathf.Round(4f + t * 24f / 26f);
+                if (x2 >= 0 && x2 < s && y2 >= 0 && y2 < s) img.SetPixel(x2, y2, col);
+            }
+        }
+        else if (kind == 1)  // 箭头（闪现斩）
+        {
+            for (int t = 6; t <= 22; t++) { img.SetPixel(7, t, col); img.SetPixel(8, t, col); }
+            for (int tt = 0; tt <= 10; tt++)
+            {
+                int x = 9 + tt;
+                if (x < s) { int y = 14 - tt; if (y >= 0) img.SetPixel(x, y, col); int y2 = 14 + tt; if (y2 < s) img.SetPixel(x, y2, col); }
+            }
+        }
+        else  // 怀表：圆环 + 指针
+        {
+            int cx = 16, cy = 16, r = 11;
+            for (int a = 0; a < 360; a += 4)
+            {
+                float rad = a * Mathf.Pi / 180f;
+                int x = cx + (int)Mathf.Round(Mathf.Cos(rad) * r);
+                int y = cy + (int)Mathf.Round(Mathf.Sin(rad) * r);
+                if (x >= 0 && x < s && y >= 0 && y < s) img.SetPixel(x, y, col);
+            }
+            for (int t = 0; t <= 10; t++) { int x = cx + t; if (x < s) img.SetPixel(x, cy, col); }
+        }
+        return ImageTexture.CreateFromImage(img);
+    }
+
     private void UpdateSkills()
     {
         if (_player == null) return;
@@ -267,6 +403,33 @@ public partial class Hud : Control
         if (RuleManager.Instance != null && RuleManager.Instance.IsVacuum)
             _vacuum.Text = $"真空期 {RuleManager.Instance.VacuumRemaining:F1}s · 攻击×3 移速×2";
         UpdateSkills();
+
+        if (_player != null)
+        {
+            _energyBar.MaxValue = _player.EnergyMax;
+            _energyBar.Value = _player.Energy;
+            _energyLabel.Text = $"能量 {_player.Energy:F0}/{_player.EnergyMax:F0}";
+            int sel = _player.SelectedUlt;
+            bool full = _player.IsEnergyFull;
+            for (int i = 0; i < 3; i++)
+            {
+                bool on = i == sel;
+                if (!_player.UltReady(i))
+                {
+                    // 冷却中：图标压暗 + 显示剩余秒数
+                    _ultIcons[i].Modulate = new Color(0.25f, 0.25f, 0.25f);
+                    _ultFrames[i].Modulate = new Color(0.4f, 0.4f, 0.4f);
+                    _ultCdLabels[i].Visible = true;
+                    _ultCdLabels[i].Text = Mathf.Ceil(_player.UltCdRemaining(i)).ToString();
+                }
+                else
+                {
+                    _ultIcons[i].Modulate = full ? (on ? Colors.White : new Color(0.7f, 0.7f, 0.7f)) : new Color(0.4f, 0.4f, 0.4f);
+                    _ultFrames[i].Modulate = on ? Colors.White : new Color(0.6f, 0.6f, 0.6f);
+                    _ultCdLabels[i].Visible = false;
+                }
+            }
+        }
     }
 
     private void Update()

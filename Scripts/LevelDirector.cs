@@ -1,5 +1,6 @@
 using Godot;
 using System;
+using System.Linq;
 
 namespace BreakingRules;
 
@@ -15,6 +16,12 @@ public partial class LevelDirector : Node2D
     private bool _canNext;
     private CanvasLayer _pauseLayer;   // ESC 暂停对话框（独立层，与胜负对话框区分）
     private bool _paused;
+    private bool _cardPicking;          // 卡牌选择浮层是否打开（打开时屏蔽 ESC 等输入）
+    private CanvasLayer _cardLayer;
+    private Label _cardTitle;
+    private VBoxContainer _cardBody;
+    private CanvasLayer _cardViewLayer; // ESC 暂停内的「查看卡牌」窗口（列出已选卡，特赦令已用则灰）
+    private bool _cardViewOpen;
 
     public override void _Ready()
     {
@@ -38,6 +45,10 @@ public partial class LevelDirector : Node2D
         BuildPauseDialog();
         // 注意：BGM 由 RuleManager 在游戏启动即全局循环播放（跨场景续播、暂停也不断），
         // 此处不再单独启停。
+
+        // 第 3 关起（CurrentStage>=2）开局暂停弹「3 选 1」卡牌浮层
+        if (RunState.Instance != null && RunState.Instance.CurrentStage >= 2)
+            CallDeferred(nameof(ShowCardPicker));
     }
 
     private void BuildTerrain()
@@ -195,8 +206,8 @@ public partial class LevelDirector : Node2D
         _pauseLayer.AddChild(dim);
 
         var panel = new Panel();
-        panel.Position = new Vector2(300f, 145f);  // 垂直居中：(540-250)/2
-        panel.Size = new Vector2(360f, 250f);      // 加高以容纳标题 + 两个按钮，避免第二按钮溢出底部
+        panel.Position = new Vector2(300f, 120f);  // 垂直居中：(540-300)/2
+        panel.Size = new Vector2(360f, 300f);      // 容纳标题 + 三个按钮（返回游戏/返回标题/查看卡牌）
         var ps = new StyleBoxFlat();
         ps.BgColor = new Color(0.08f, 0.06f, 0.12f, 0.96f);
         ps.BorderColor = new Color(1f, 0.85f, 0.25f, 0.95f);
@@ -207,8 +218,8 @@ public partial class LevelDirector : Node2D
 
         var vbox = new VBoxContainer();
         // vbox 相对 panel（左上角原点）
-        vbox.Position = new Vector2(50f, 40f);
-        vbox.Size = new Vector2(260f, 170f);   // 高于内容最小高度(~165)，留足底部余量
+        vbox.Position = new Vector2(50f, 36f);
+        vbox.Size = new Vector2(260f, 228f);   // 高于内容最小高度(~214)，留足底部余量
         vbox.AddThemeConstantOverride("separation", 16);
         panel.AddChild(vbox);
 
@@ -241,6 +252,17 @@ public partial class LevelDirector : Node2D
         WireButtonSfx(toTitle);
         vbox.AddChild(toTitle);
 
+        var viewCards = new Button();
+        viewCards.Text = "查看卡牌";
+        viewCards.CustomMinimumSize = new Vector2(260f, 46f);
+        viewCards.AddThemeFontSizeOverride("font_size", 18);
+        viewCards.Alignment = HorizontalAlignment.Center;
+        viewCards.ProcessMode = Node.ProcessModeEnum.Always;
+        viewCards.FocusMode = Control.FocusModeEnum.None;
+        viewCards.Pressed += OpenCardView;
+        WireButtonSfx(viewCards);
+        vbox.AddChild(viewCards);
+
         _pauseLayer.Visible = false;
     }
 
@@ -263,6 +285,101 @@ public partial class LevelDirector : Node2D
         _paused = false;
         GetTree().Paused = false;
         _pauseLayer.Visible = false;
+        if (_cardViewOpen) CloseCardView();   // 顺手关掉卡牌窗口，避免残留
+    }
+
+    // ---------- ESC 暂停内的「查看卡牌」窗口 ----------
+    private void OpenCardView()
+    {
+        if (RunState.Instance == null) return;
+        CloseCardView();   // 确保单个实例
+        _cardViewOpen = true;
+        _cardViewLayer = new CanvasLayer();
+        _cardViewLayer.Layer = 35;    // 高于 ESC 暂停(25)
+        _cardViewLayer.ProcessMode = Node.ProcessModeEnum.Always; // 暂停时窗口可交互
+        AddChild(_cardViewLayer);
+
+        var dim = new ColorRect();
+        dim.Color = new Color(0f, 0f, 0f, 0.55f);
+        dim.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+        dim.MouseFilter = Control.MouseFilterEnum.Stop;
+        _cardViewLayer.AddChild(dim);
+
+        var panel = new Panel();
+        panel.Position = new Vector2(200f, 60f);
+        panel.Size = new Vector2(560f, 420f);
+        var ps = new StyleBoxFlat();
+        ps.BgColor = new Color(0.08f, 0.06f, 0.12f, 0.97f);
+        ps.BorderColor = new Color(1f, 0.85f, 0.25f, 0.95f);
+        ps.BorderWidthLeft = ps.BorderWidthTop = ps.BorderWidthRight = ps.BorderWidthBottom = 4;
+        panel.AddThemeStyleboxOverride("panel", ps);
+        panel.MouseFilter = Control.MouseFilterEnum.Stop;
+        _cardViewLayer.AddChild(panel);
+
+        var title = new Label();
+        title.Text = "已选卡牌";
+        title.HorizontalAlignment = HorizontalAlignment.Center;
+        title.AddThemeFontSizeOverride("font_size", 24);
+        title.Modulate = new Color(1f, 0.9f, 0.5f);
+        title.Position = new Vector2(0f, 14f);
+        title.Size = new Vector2(560f, 32f);
+        panel.AddChild(title);
+
+        var body = new VBoxContainer();
+        body.Position = new Vector2(30f, 56f);
+        body.Size = new Vector2(500f, 320f);
+        body.AddThemeConstantOverride("separation", 8);
+        panel.AddChild(body);
+
+        if (RunState.Instance.OwnedCards.Count == 0)
+        {
+            var empty = new Label();
+            empty.Text = "（暂无卡牌）";
+            empty.HorizontalAlignment = HorizontalAlignment.Center;
+            empty.AddThemeFontSizeOverride("font_size", 18);
+            empty.Modulate = Colors.Gray;
+            body.AddChild(empty);
+        }
+        foreach (var id in RunState.Instance.OwnedCards)
+        {
+            var card = CardDefs.Get(id).Value;
+            bool spent = (id == "pardon" && _player != null && _player.PardonUsed);
+            var row = new VBoxContainer();
+            row.AddThemeConstantOverride("separation", 2);
+            var n = new Label();
+            n.Text = spent ? $"{card.name}（已使用）" : card.name;
+            n.AddThemeFontSizeOverride("font_size", 18);
+            n.HorizontalAlignment = HorizontalAlignment.Center;
+            n.Modulate = spent ? Colors.Gray : card.color;
+            var d = new Label();
+            d.Text = card.desc;
+            d.AddThemeFontSizeOverride("font_size", 13);
+            d.AutowrapMode = TextServer.AutowrapMode.Word;
+            d.HorizontalAlignment = HorizontalAlignment.Center;
+            d.CustomMinimumSize = new Vector2(460f, 30f);
+            d.Modulate = spent ? Colors.Gray : new Color(0.9f, 0.9f, 0.95f);
+            row.AddChild(n);
+            row.AddChild(d);
+            body.AddChild(row);
+        }
+
+        var close = new Button();
+        close.Text = "关闭  (Esc)";
+        close.CustomMinimumSize = new Vector2(200f, 40f);
+        close.Position = new Vector2(180f, 372f);
+        close.Alignment = HorizontalAlignment.Center;
+        close.ProcessMode = Node.ProcessModeEnum.Always;
+        close.FocusMode = Control.FocusModeEnum.None;
+        close.Pressed += CloseCardView;
+        WireButtonSfx(close);
+        panel.AddChild(close);
+    }
+
+    private void CloseCardView()
+    {
+        _cardViewOpen = false;
+        _cardViewLayer?.QueueFree();
+        _cardViewLayer = null;
     }
 
     private void ShowDialog(string title, string stats, params (string label, Action action)[] buttons)
@@ -298,6 +415,8 @@ public partial class LevelDirector : Node2D
         {
             RunState.Instance.CarryHp = _player.Hp;
             RunState.Instance.CarrySkill = _player.SkillPoints;
+            RunState.Instance.CarryEnergy = _player.Energy;     // 能量条跨关继承
+            RunState.Instance.CarryUlt = _player.SelectedUlt;  // 所选大招跨关继承
             RunState.Instance.Carry = true;
         }
         if (RunState.Instance != null) RunState.Instance.CurrentStage++;
@@ -320,6 +439,7 @@ public partial class LevelDirector : Node2D
     {
         _ended = false;
         _paused = false;
+        if (_cardViewOpen) CloseCardView();
         if (_pauseLayer != null) _pauseLayer.Visible = false;
         GetTree().Paused = false;
         GetTree().ChangeSceneToFile("res://Scenes/Title.tscn");
@@ -327,6 +447,7 @@ public partial class LevelDirector : Node2D
 
     public override void _UnhandledInput(InputEvent @event)
     {
+        if (_cardPicking) return;   // 卡牌选择期间屏蔽一切按键（ESC/胜负快捷键）
         if (@event is InputEventKey key && key.Pressed && !key.Echo)
         {
             // 游戏中按 ESC：暂停；再按 ESC 默认返回游戏
@@ -334,7 +455,8 @@ public partial class LevelDirector : Node2D
             {
                 if (!_ended)
                 {
-                    if (_paused) ResumeGame();
+                    if (_cardViewOpen) CloseCardView();   // 卡牌查看窗口优先关闭（回到暂停菜单）
+                    else if (_paused) ResumeGame();
                     else PauseGame();
                 }
                 return; // ESC 不触发下方胜负快捷键
@@ -348,5 +470,138 @@ public partial class LevelDirector : Node2D
             else if (key.Keycode == Key.T)
                 OnReturnToTitle();
         }
+    }
+
+    // ---------- 卡牌选择浮层（第 3 关起每关开局） ----------
+    private void ShowCardPicker()
+    {
+        if (RunState.Instance == null) return;
+        _cardPicking = true;
+        GetTree().Paused = true;   // 开局暂停，玩家选牌
+        BuildCardLayer();
+        ShowThreeChoices();
+    }
+
+    private void BuildCardLayer()
+    {
+        _cardLayer?.QueueFree();
+        _cardLayer = new CanvasLayer();
+        _cardLayer.Layer = 30;    // 高于胜负对话框(20)与 ESC 暂停(25)
+        _cardLayer.ProcessMode = Node.ProcessModeEnum.Always; // 暂停时浮层可交互
+        AddChild(_cardLayer);
+
+        var dim = new ColorRect();
+        dim.Color = new Color(0f, 0f, 0f, 0.72f);
+        dim.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+        dim.MouseFilter = Control.MouseFilterEnum.Stop;
+        _cardLayer.AddChild(dim);
+
+        var panel = new Panel();
+        panel.Position = new Vector2(120f, 70f);
+        panel.Size = new Vector2(720f, 400f);
+        var ps = new StyleBoxFlat();
+        ps.BgColor = new Color(0.08f, 0.06f, 0.12f, 0.97f);
+        ps.BorderColor = new Color(1f, 0.85f, 0.25f, 0.95f);
+        ps.BorderWidthLeft = ps.BorderWidthTop = ps.BorderWidthRight = ps.BorderWidthBottom = 4;
+        panel.AddThemeStyleboxOverride("panel", ps);
+        panel.MouseFilter = Control.MouseFilterEnum.Stop;
+        _cardLayer.AddChild(panel);
+
+        _cardTitle = new Label();
+        _cardTitle.Position = new Vector2(0f, 14f);
+        _cardTitle.Size = new Vector2(720f, 30f);
+        _cardTitle.HorizontalAlignment = HorizontalAlignment.Center;
+        _cardTitle.AddThemeFontSizeOverride("font_size", 22);
+        _cardTitle.Modulate = new Color(1f, 0.9f, 0.5f);
+        panel.AddChild(_cardTitle);
+
+        _cardBody = new VBoxContainer();
+        _cardBody.Position = new Vector2(40f, 60f);
+        _cardBody.Size = new Vector2(640f, 320f);
+        _cardBody.AddThemeConstantOverride("separation", 12);
+        panel.AddChild(_cardBody);
+    }
+
+    private void ShowThreeChoices()
+    {
+        _cardTitle.Text = $"选择一张卡牌（第{RunState.Instance.CurrentStage + 1}关）";
+        foreach (Node c in _cardBody.GetChildren()) c.QueueFree();
+        var pool = new System.Collections.Generic.List<string>();
+        foreach (var card in CardDefs.All)
+            if (!RunState.Instance.OwnedCards.Contains(card.id)) pool.Add(card.id);
+        var picks = CardDefs.DrawDistinct(pool, 3);
+        foreach (var id in picks)
+        {
+            var card = CardDefs.Get(id).Value;
+            _cardBody.AddChild(MakeCardButton(card.name, card.desc, card.color, () => OnPickCard(id)));
+        }
+    }
+
+    // 满 5 张时选第 6 张：进入替换步骤（换掉的卡回卡池）
+    private void ShowSwapStep(string newId)
+    {
+        var card = CardDefs.Get(newId).Value;
+        _cardTitle.Text = $"已满 5 张：选择一张替换（{card.name} 将加入）";
+        foreach (Node c in _cardBody.GetChildren()) c.QueueFree();
+        foreach (var oldId in RunState.Instance.OwnedCards)
+        {
+            var oc = CardDefs.Get(oldId).Value;
+            _cardBody.AddChild(MakeCardButton(oc.name, oc.desc, oc.color, () => OnSwapOut(newId, oldId)));
+        }
+    }
+
+    private Button MakeCardButton(string name, string desc, Color color, System.Action act)
+    {
+        var btn = new Button();
+        btn.Text = "";
+        btn.CustomMinimumSize = new Vector2(640f, 92f);
+        btn.AddThemeFontSizeOverride("font_size", 18);
+        btn.Alignment = HorizontalAlignment.Center;
+        btn.ProcessMode = Node.ProcessModeEnum.Always;
+        btn.FocusMode = Control.FocusModeEnum.None;   // 键盘不抢焦点
+        var vb = new VBoxContainer();
+        vb.AddThemeConstantOverride("separation", 4);
+        var n = new Label();
+        n.Text = name; n.AddThemeFontSizeOverride("font_size", 20);
+        n.Modulate = color; n.HorizontalAlignment = HorizontalAlignment.Center;
+        var d = new Label();
+        d.Text = desc; d.AddThemeFontSizeOverride("font_size", 15);
+        d.AutowrapMode = TextServer.AutowrapMode.Word;
+        d.HorizontalAlignment = HorizontalAlignment.Center;
+        d.CustomMinimumSize = new Vector2(600f, 44f);
+        vb.AddChild(n); vb.AddChild(d);
+        btn.AddChild(vb);
+        btn.Pressed += () => act();
+        WireButtonSfx(btn);
+        return btn;
+    }
+
+    private void OnPickCard(string id)
+    {
+        if (RunState.Instance == null) return;
+        if (RunState.Instance.OwnedCards.Count < RunState.MaxCards)
+        {
+            RunState.Instance.AddCard(id);
+            CloseCardPicker();
+        }
+        else
+        {
+            ShowSwapStep(id);   // 已满 5 张 → 进入替换步骤
+        }
+    }
+
+    private void OnSwapOut(string newId, string oldId)
+    {
+        RunState.Instance.RemoveCard(oldId);   // 换掉的卡回到卡池（下次抽取可能出现）
+        RunState.Instance.AddCard(newId);
+        CloseCardPicker();
+    }
+
+    private void CloseCardPicker()
+    {
+        _cardPicking = false;
+        GetTree().Paused = false;
+        _cardLayer?.QueueFree();
+        _cardLayer = null;
     }
 }

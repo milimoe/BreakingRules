@@ -101,6 +101,19 @@ layout_mode = 2
 theme_override_font_sizes/font_size = 14
 text = "治愈：4 自我治愈（+2 HP）"
 
+[node name="Ult" type="Label" parent="VBox/Content"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+modulate = Color(1, 0.85, 0.3, 1)
+text = "大招：F 切换 · 长按 E 释放（需能量充满）"
+
+[node name="Ult2" type="Label" parent="VBox/Content"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+modulate = Color(0.7, 0.75, 0.95, 0.85)
+autowrap_mode = 1
+text = "乱刀斩(重创) CD20s / 闪现斩(眩晕) CD18s / 时间怀表(回血) CD25s"
+
 [node name="Rule" type="Label" parent="VBox/Content"]
 layout_mode = 2
 theme_override_font_sizes/font_size = 13

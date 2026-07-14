@@ -66,6 +66,11 @@ public partial class Boss : CharacterBody2D
     private bool _grabActive;           // 投技进行中（防止重入）
     private CancellationTokenSource _gcts;  // 投技独立取消源（死亡/场景切换取消）
 
+    // 卡牌相关状态
+    private float _stunT;          // 闪现斩眩晕剩余时间（⌛ 图标 + 击倒）
+    private int _despiseStacks;    // 蔑视之刃叠层数（0..5）
+    private float _despiseT;       // 蔑视层数剩余时长（3s）
+
     // 候选基础规则类型（随机抽一条；【左右反转】仅在全图规则路径中独立出现）
     private static readonly RuleMode[] RuleTypes =
     {
@@ -116,6 +121,25 @@ public partial class Boss : CharacterBody2D
         if (_target == null) return;
         float d = (float)delta;
 
+        // 眩晕（闪现斩）：击倒、冻结一切行动与靠近，⌛ 图标常驻；归零复位。
+        if (_stunT > 0f)
+        {
+            _stunT -= d;
+            if (_stunT <= 0f) { HideStatusIcon(); if (_sprite != null) _sprite.Rotation = 0f; }
+            Velocity = Vector2.Zero;
+            MoveAndSlide();
+            GlobalPosition = new Vector2(
+                Mathf.Clamp(GlobalPosition.X, 40f, 920f),
+                Mathf.Clamp(GlobalPosition.Y, 80f, 460f));
+            return;
+        }
+        // 蔑视之刃层数随时间衰减（叠层后 3s 清零）
+        if (_despiseStacks > 0)
+        {
+            _despiseT -= d;
+            if (_despiseT <= 0f) _despiseStacks = 0;
+        }
+
         // 生成条文：随机类型 + 随机表面 + 随机 x → 散布到竞技场各处。
         // 第 2 关起基础规则可能升级为全图规则（含专门的【左右反转】）；第 3 关起可能跟随玩家。
         _spawnTimer -= d;
@@ -160,8 +184,12 @@ public partial class Boss : CharacterBody2D
         // 攻击调度：普通攻击遵循 AttackInterval 间隔；自愈/暴怒为「非阻塞增益」，
         // 立即发动且不冻结移动，随后本帧立即再抽一个真正的攻击（无需再等一轮间隔）。
         // 间隔期间 boss 走下方 else 分支持续靠近玩家。
+        // 反诉：玩家处于禁攻区时，BOSS 也不得发动普通攻击（投技不受此限）
+        bool playerNoAttack = RunState.Instance != null && RunState.Instance.HasCard("counter")
+            && RuleManager.Instance != null && RuleManager.Instance.PlayerInMode(RuleMode.NoAttack);
+
         _attackTimer -= d;
-        if (_attackTimer <= 0f && !_attackActive)
+        if (_attackTimer <= 0f && !_attackActive && !playerNoAttack)
         {
             var kind = PickAttack();
             if (kind == AttackKind.Enrage || kind == AttackKind.Heal)
@@ -197,7 +225,10 @@ public partial class Boss : CharacterBody2D
         float dist = toP.Length();
         Vector2 dir = dist > 1f ? toP / dist : Vector2.Zero;
         float desired = RestDistance;
-        float spd = HoverSpeed * (dist > desired ? 1f : -0.6f);
+        // 反诉：玩家处于限速区时，BOSS 移动也变慢
+        bool playerSlow = RunState.Instance != null && RunState.Instance.HasCard("counter")
+            && RuleManager.Instance != null && RuleManager.Instance.PlayerInMode(RuleMode.Slow);
+        float spd = HoverSpeed * (dist > desired ? 1f : -0.6f) * (playerSlow ? 0.4f : 1f);
         Velocity = dir * spd;
         MoveAndSlide();
         GlobalPosition = new Vector2(
@@ -578,10 +609,32 @@ public partial class Boss : CharacterBody2D
     }
 
     // ---------- 受击 / 死亡 ----------
+    // 卡牌相关：蔑视叠加 / 闪现斩眩晕
+    /// <summary>蔑视之刃：普攻命中叠加一层（最多 5 层），每层使本 BOSS 受伤 +5%、持续 3s。</summary>
+    public void AddDespise()
+    {
+        if (_despiseStacks < 5) _despiseStacks++;
+        _despiseT = 3f;
+    }
+
+    /// <summary>闪现斩：眩晕（击倒）指定秒数，头顶显示 ⌛；归零复位朝向。</summary>
+    public void ApplyStun(float sec)
+    {
+        _stunT = Mathf.Max(_stunT, sec);
+        ShowStatusIcon("⌛");
+        if (_sprite != null) _sprite.Rotation = Mathf.DegToRad(80f); // 击倒倾斜
+    }
+
     public void TakeDamage(int amount)
     {
         if (_hp <= 0) return;
-        _hp -= amount;
+        // 蔑视之刃：敌人受伤 +5%/层（最多 5 层）
+        float mult = 1f + 0.05f * _despiseStacks;
+        // 逆转裁判：生命值低于 40% 时，所有伤害提升 100%
+        if (RunState.Instance != null && RunState.Instance.HasCard("reverse") && _hp <= MaxHp * 0.40f)
+            mult *= 2f;
+        int eff = (int)Mathf.Round(amount * mult);
+        _hp -= eff;
         EmitSignal(SignalName.HealthChanged, _hp, MaxHp);
         var t = CreateTween();
         t.TweenProperty(_sprite, "modulate", Colors.White, 0.06f);

@@ -68,6 +68,36 @@ public partial class Player : CharacterBody2D
 
     public int Hp => _hp;
 
+    // ---------- 能量条 / 大招系统 ----------
+    private float _energy;           // 当前能量（满 EnergyMax 可释放大招）
+    private int _selectedUlt;        // 当前选中的大招（0 乱刀斩 / 1 闪现斩 / 2 时间怀表）
+    private float _eHeld;            // E 键长按计时（满 0.6s 释放）
+    private bool _ultFired;          // 本次长按是否已释放（防重复）
+    private bool _fWasDown;          // F 键边沿检测
+    private float _saltBuff;         // 伤口撒盐：违令扣血后 2s 内下次攻击 +50%
+    private float _regenT;           // 时间怀表：回血剩余时间
+    private float _regenAccum;       // 时间怀表：回血累积器
+    private int _defenseCount;       // 无罪推定：本场防御计数
+    private bool _pardonUsed;        // 特赦令：本场是否已触发
+
+    // 大招独立冷却（剩余秒）；与能量消耗相互独立，释放后进入冷却
+    private float[] _ultCd = { 0f, 0f, 0f };
+    private static readonly float[] UltCdMax = { 20f, 18f, 25f };  // 大招 CD：乱刀斩 / 闪现斩 / 时间怀表
+
+    public float Energy => _energy;
+    public float EnergyMax => 50f;   // 能量满值固定 50（闪电宣读改为消除额外 +10 能量，不提升上限）
+    public int SelectedUlt => _selectedUlt;
+    public bool IsEnergyFull => _energy >= EnergyMax;
+    public float UltCdRemaining(int i) => _ultCd[i];
+    public float UltCdMaxValue(int i) => UltCdMax[i];
+    public bool UltReady(int i) => _ultCd[i] <= 0f;
+
+    /// <summary>特赦令是否已在本关使用（用于卡牌查看窗口灰色显示）。</summary>
+    public bool PardonUsed => _pardonUsed;
+
+    /// <summary>统一查询是否持有某张卡（卡牌存储于 RunState 跨关保留）。</summary>
+    private static bool HasCard(string id) => RunState.Instance != null && RunState.Instance.HasCard(id);
+
     public override void _Ready()
     {
         // 跨关继承：进入下一关时携带上一关的当前生命与技能点；
@@ -76,11 +106,15 @@ public partial class Player : CharacterBody2D
         {
             _hp = Mathf.Min(RunState.Instance.CarryHp, MaxHp);
             SkillPoints = Mathf.Min(RunState.Instance.CarrySkill, SkillMax);
+            _energy = RunState.Instance.CarryEnergy;        // 能量条跨关继承
+            _selectedUlt = RunState.Instance.CarryUlt;      // 所选大招跨关继承
         }
         else
         {
             _hp = MaxHp;
             SkillPoints = 0;
+            _energy = 0f;
+            _selectedUlt = 0;
         }
         _sprite = GetNode<AnimatedSprite2D>("Sprite");
         SetupPlayerAnimation();
@@ -121,6 +155,14 @@ public partial class Player : CharacterBody2D
         _camera.LimitRight = 960;
         _camera.LimitBottom = 540;
         AddToGroup("player");
+        // 每场（每关载入）重置的计数 / 大招状态（卡牌持有跨关保留，不在此清）
+        _defenseCount = 0;
+        _pardonUsed = false;
+        _saltBuff = 0f;
+        _regenT = 0f;
+        _regenAccum = 0f;
+        for (int i = 0; i < _ultCd.Length; i++) _ultCd[i] = 0f;  // 大招 CD 每关重置
+        // 注意：_selectedUlt / _energy 已在上方 Carry 分支中决定（继承或归零），此处不再复位
         // 通知 HUD 同步初始生命（含跨关继承值）；HUD 若尚未订阅则直接读取 _player.Hp 也能得到正确值
         EmitSignal(SignalName.HealthChanged, _hp, MaxHp);
     }
@@ -188,11 +230,16 @@ public partial class Player : CharacterBody2D
                     r.Mode == RuleMode.NoJump && r.Contains(GlobalPosition));
             if (inNoJump)
             {
-                Velocity = new Vector2(Velocity.X, 0); // 取消起跳
+                // 违规罚血 + 撒盐窗口（违令扣血后 2s 内下次攻击 +50%）
                 if (_invuln <= 0) TakeDamage(1);
+                _saltBuff = 2f;
                 ShowPopup("违规！", Colors.Red);
                 Shake();
                 RuleManager.Instance?.PlaySFX("violation");
+                if (!HasCard("salt"))
+                    Velocity = new Vector2(Velocity.X, 0);  // 不持有「伤口撒盐」：取消起跳（被禁跳拦住）
+                else if (IsOnFloor())
+                    Velocity = new Vector2(Velocity.X, JumpVelocity * _jumpBuff);  // 持有盐：仍可跳出禁跳区（行动不被阻止）
             }
             else if (IsOnFloor())
             {
@@ -210,15 +257,18 @@ public partial class Player : CharacterBody2D
             bool inNoAttack = !shield && RuleManager.Instance != null &&
                 RuleManager.Instance.ActiveRules.Any(r => IsInstanceValid(r) &&
                     r.Mode == RuleMode.NoAttack && r.Contains(GlobalPosition));
-            if (inNoAttack)
+            if (inNoAttack && !HasCard("salt"))
             {
+                // 禁武区违规：罚血 + 撒盐窗口（不持有「伤口撒盐」则禁止攻击）
                 if (_invuln <= 0) TakeDamage(1);
+                _saltBuff = 2f;
                 ShowPopup("违规！", Colors.Red);
                 Shake();
                 RuleManager.Instance?.PlaySFX("violation");
             }
             else
             {
+                // 普通攻击，或持有「伤口撒盐」时在禁武区内照常攻击（行动不被阻止）
                 Swing();
             }
         }
@@ -233,8 +283,8 @@ public partial class Player : CharacterBody2D
             {
                 _strikeProgress += d;
                 if (_strikeFill != null)
-                    _strikeFill.Scale = new Vector2(Mathf.Clamp(_strikeProgress / StrikeChargeTime, 0f, 1f), 1f);
-                if (_strikeProgress >= StrikeChargeTime) CompleteStrike();
+                    _strikeFill.Scale = new Vector2(Mathf.Clamp(_strikeProgress / StrikeChargeTimeEffective, 0f, 1f), 1f);
+                if (_strikeProgress >= StrikeChargeTimeEffective) CompleteStrike();
             }
         }
         else if (_qCd <= 0f && !guarding && Input.IsActionJustPressed("strike"))
@@ -258,6 +308,44 @@ public partial class Player : CharacterBody2D
         if (Input.IsActionJustPressed("skill2")) TryCast(2, CastSkill2, ref _cd2, Cd2);
         if (Input.IsActionJustPressed("skill3")) TryCast(3, CastSkill3, ref _cd3, Cd3);
         if (Input.IsActionJustPressed("skill4")) TryCast(4, CastSkill4, ref _cd4, Cd4);
+
+        // 大招：F 循环切换选中，长按 E(0.6s) 释放当前选中（能量满时）
+        bool eDown = Input.IsKeyPressed(Key.E);
+        if (eDown)
+        {
+            _eHeld += d;
+            if (_eHeld >= 0.6f && !_ultFired && IsEnergyFull)
+            {
+                ReleaseUltimate(_selectedUlt);
+                _ultFired = true;
+            }
+        }
+        else { _eHeld = 0f; _ultFired = false; }
+
+        bool fDown = Input.IsKeyPressed(Key.F);
+        if (fDown && !_fWasDown)
+        {
+            _selectedUlt = (_selectedUlt + 1) % 3;
+            ShowPopup(UltName(_selectedUlt), Colors.Gold);
+        }
+        _fWasDown = fDown;
+
+        // 伤口撒盐 / 时间怀表 计时
+        if (_saltBuff > 0f) _saltBuff -= d;
+        if (_regenT > 0f)
+        {
+            _regenT -= d;
+            _regenAccum += d;
+            while (_regenAccum >= 1f)
+            {
+                _regenAccum -= 1f;
+                if (_hp < MaxHp) { _hp++; EmitSignal(SignalName.HealthChanged, _hp, MaxHp); }
+            }
+        }
+
+        // 大招冷却递减（每个大招独立计时）
+        for (int i = 0; i < _ultCd.Length; i++)
+            if (_ultCd[i] > 0f) _ultCd[i] = Mathf.Max(0f, _ultCd[i] - d);
 
         MoveAndSlide();
 
@@ -284,10 +372,73 @@ public partial class Player : CharacterBody2D
         tween.TweenProperty(_sprite, "scale", Vector2.One * BaseScale * 1.4f, 0.08f).From(Vector2.One * BaseScale);
         tween.TweenProperty(_sprite, "scale", Vector2.One * BaseScale, 0.08f);
 
-        float dmg = AttackPower * (RuleManager.Instance != null ? RuleManager.Instance.AttackMult : 1f);
+        int dealt = ComputeAttackDamage(AttackPower);
         foreach (Node n in GetTree().GetNodesInGroup("boss"))
             if (n is Boss b && GlobalPosition.DistanceTo(b.GlobalPosition) < 84f)
-                b.TakeDamage((int)Mathf.Round(dmg));
+            {
+                b.AddDespise();   // 蔑视之刃：普攻命中叠加蔑视
+                b.TakeDamage(dealt);
+            }
+        GainEnergyForDamage(dealt);
+    }
+
+    /// <summary>统一计算一次玩家攻击的最终伤害：含真空期攻击倍率、伤口撒盐(+50%)、终审判决(血=1 时 +30%)。</summary>
+    private int ComputeAttackDamage(float baseDmg)
+    {
+        float dmg = baseDmg * (RuleManager.Instance != null ? RuleManager.Instance.AttackMult : 1f);
+        if (_saltBuff > 0f) { dmg *= 1.5f; _saltBuff = 0f; }   // 伤口撒盐：本次攻击消耗
+        if (HasCard("final") && _hp == 1) dmg *= 1.3f;         // 终审判决：丝血攻击 +30%
+        return (int)Mathf.Round(dmg);
+    }
+
+    /// <summary>积累能量：基础量 × 终审判决(血=1 时 +30%)。能量上限见 EnergyMax。</summary>
+    private void GainEnergy(float amount)
+    {
+        float mult = 1f;
+        if (HasCard("final") && _hp == 1) mult = 1.3f;
+        _energy = Mathf.Min(EnergyMax, _energy + amount * mult);
+    }
+    private void GainEnergyForDamage(int dealt) => GainEnergy(dealt * 2f);  // 每造成 1 点伤害 +2 能量
+
+    private static string UltName(int i) => i switch
+    {
+        0 => "乱刀斩",
+        1 => "闪现斩",
+        _ => "时间怀表",
+    };
+
+    /// <summary>释放选中的大招（消耗全部能量）。三种：乱刀斩12 / 闪现斩8+眩晕 / 时间怀表回血7s。</summary>
+    private void ReleaseUltimate(int idx)
+    {
+        if (_ultCd[idx] > 0f) { ShowPopup("大招冷却中", Colors.Gray); return; }  // 冷却未就绪先拦截（不消耗能量）
+        if (Energy < EnergyMax) return;
+        _energy = 0f;
+        var boss = GetTree().GetFirstNodeInGroup("boss") as Boss;
+        switch (idx)
+        {
+            case 0: // 乱刀斩：原地重击 BOSS 12 点
+                if (boss != null && IsInstanceValid(boss)) boss.TakeDamage(ComputeAttackDamage(12f));
+                ShowPopup("乱刀斩!", Colors.Gold);
+                break;
+            case 1: // 闪现斩：瞬移到 BOSS 身后，造成 8 点并击倒 + 2s 眩晕
+                if (boss != null && IsInstanceValid(boss))
+                {
+                    Vector2 behind = boss.GlobalPosition + new Vector2(boss.GlobalPosition.X < 480f ? 70f : -70f, 0f);
+                    GlobalPosition = new Vector2(Mathf.Clamp(behind.X, 16f, 944f), boss.GlobalPosition.Y);
+                    boss.TakeDamage(ComputeAttackDamage(8f));
+                    boss.ApplyStun(2f);
+                }
+                ShowPopup("闪现斩!", Colors.Gold);
+                break;
+            case 2: // 时间怀表：每秒回复 1 点生命，持续 7 秒
+                _regenT = 7f;
+                _regenAccum = 0f;
+                ShowPopup("时间怀表!", new Color(0.5f, 0.9f, 1f));
+                break;
+        }
+        _ultCd[idx] = UltCdMax[idx];   // 释放后进入独立冷却（与能量消耗无关）
+        RuleManager.Instance?.PlaySFX("vacuum_start");
+        Shake();
     }
 
     /// <summary>用 Players/Tiles/tile_0000~0007 八张同角色图构建 SpriteFrames：
@@ -361,6 +512,9 @@ public partial class Player : CharacterBody2D
         Shake();
         RuleManager.Instance.PlaySFX("paper_tear");
         RuleManager.Instance.StrikeRule(nearest);
+        GainEnergy(10);                          // 消除规则 +10 能量（基础）
+        if (HasCard("lightning")) GainEnergy(10);// 闪电宣读：消除额外 +10 能量
+        if (HasCard("chain")) CastRayFree(0.5f); // 连锁违宪：消除后免费释放 50% 八向射线
     }
 
     private void CancelStrike()
@@ -401,6 +555,10 @@ public partial class Player : CharacterBody2D
     public bool IsQReady => _qCd <= 0f;
     public float QSkillCd => _qCd;
     public float QSkillCdMax => QCd;
+    // Q 蓄力有效时长：闪电宣读 1s→0.5s；终审判决(血=1) 再减半
+    private float StrikeChargeTimeEffective =>
+        (HasCard("lightning") ? 0.5f : StrikeChargeTime) *
+        (HasCard("final") && _hp == 1 ? 0.5f : 1f);
 
     /// <summary>技能1：在角色所在水平面释放一条贯穿全屏的毁灭直线，命中同平面 Boss。</summary>
     private void CastSkill1()
@@ -409,14 +567,16 @@ public partial class Player : CharacterBody2D
         SpawnBeam(new Vector2[] { new Vector2(0f, py), new Vector2(960f, py) },
                   new Color(1f, 0.35f, 0.3f), 0.35f);
         var boss = GetTree().GetFirstNodeInGroup("boss") as Boss;
+        int dealt = ComputeAttackDamage(Skill1Damage);
         if (boss != null && IsInstanceValid(boss) && Mathf.Abs(boss.GlobalPosition.Y - py) < Skill1Band)
-            boss.TakeDamage((int)Mathf.Round(Skill1Damage * (RuleManager.Instance != null ? RuleManager.Instance.AttackMult : 1f)));
+            boss.TakeDamage(dealt);
+        GainEnergyForDamage(dealt);
         RuleManager.Instance?.PlaySFX("vacuum_start");
         Shake();
     }
 
-    /// <summary>技能2：以角色为中心向 8 个方向释放射线，命中范围内 Boss。</summary>
-    private void CastSkill2()
+    /// <summary>技能2 / 申辩 / 连锁违宪 共用：以角色为中心向 8 方向释放射线（dmgMul 默认 1；申辩=1、连锁违宪=0.5）。</summary>
+    private void CastRayFree(float dmgMul = 1f)
     {
         Vector2 c = GlobalPosition;
         var pts = new System.Collections.Generic.List<Vector2> { c };
@@ -428,9 +588,17 @@ public partial class Player : CharacterBody2D
             pts.Add(c + dir * Skill2Range);
         }
         SpawnBeam(pts.ToArray(), new Color(0.5f, 0.9f, 1f), 0.35f);
+        int dealt = ComputeAttackDamage(Skill2Damage * dmgMul);
         var boss = GetTree().GetFirstNodeInGroup("boss") as Boss;
         if (boss != null && IsInstanceValid(boss) && c.DistanceTo(boss.GlobalPosition) < Skill2Range)
-            boss.TakeDamage((int)Mathf.Round(Skill2Damage * (RuleManager.Instance != null ? RuleManager.Instance.AttackMult : 1f)));
+            boss.TakeDamage(dealt);
+        GainEnergyForDamage(dealt);
+    }
+
+    /// <summary>技能2：以角色为中心向 8 个方向释放射线，命中范围内 Boss（消耗技能点）。</summary>
+    private void CastSkill2()
+    {
+        CastRayFree(1f);
         RuleManager.Instance?.PlaySFX("vacuum_start");
         Shake();
     }
@@ -453,6 +621,7 @@ public partial class Player : CharacterBody2D
         ShowPopup("+2", new Color(0.4f, 1f, 0.5f));
         RuleManager.Instance?.PlaySFX("fall-a");   // 治愈类音效
         Shake();
+        if (HasCard("plea")) CastRayFree(1f);       // 申辩：治愈时免费释放一次八向射线
     }
 
     /// <summary>在世界坐标下生成一条短暂存在的光束（Line2D，淡出后释放）。</summary>
@@ -519,14 +688,28 @@ public partial class Player : CharacterBody2D
         if (IsGuarding) { OnGuardBlock(); return; }   // 防御优先：无视无敌帧，按住 S 即生效
         if (_invuln > 0f) return;
         _hp -= amount;
-        RuleManager.Instance?.PlaySFX("player_hurt");
-        EmitSignal(SignalName.HealthChanged, _hp, MaxHp);
         if (_hp <= 0)
         {
-            EmitSignal(SignalName.Died);
-            return;
+            if (HasCard("pardon") && !_pardonUsed)   // 特赦令：致命伤免死（锁 1 血 + 3s 青盾），每场 1 次
+            {
+                _pardonUsed = true;
+                _hp = 1;
+                _shieldTimer = Mathf.Max(_shieldTimer, 3f);
+                if (_shield3 != null) _shield3.Visible = true;
+                ShowPopup("特赦!", new Color(0.3f, 1f, 0.95f));
+                RuleManager.Instance?.PlaySFX("vacuum_start");
+            }
+            else
+            {
+                RuleManager.Instance?.PlaySFX("player_hurt");
+                EmitSignal(SignalName.HealthChanged, _hp, MaxHp);
+                EmitSignal(SignalName.Died);
+                return;
+            }
         }
         _invuln = 0.5f;
+        RuleManager.Instance?.PlaySFX("player_hurt");
+        EmitSignal(SignalName.HealthChanged, _hp, MaxHp);
     }
 
     public void OnShieldBlock()
@@ -539,6 +722,15 @@ public partial class Player : CharacterBody2D
     {
         ShowPopup("格挡!", new Color(0.5f, 0.8f, 1f));
         RuleManager.Instance?.PlaySFX("vacuum_start");
+        GainEnergy(2);   // 成功防御 +2 能量
+        _defenseCount++;
+        if (HasCard("innocent") && _defenseCount % 10 == 0)
+        {
+            RuleManager.Instance?.ClearAllRules();       // 无罪推定：清除全屏规则
+            _shieldTimer = Mathf.Max(_shieldTimer, 2f);  // 并获得 2s 青色护盾
+            if (_shield3 != null) _shield3.Visible = true;
+            ShowPopup("无罪推定!", new Color(0.3f, 1f, 0.95f));
+        }
     }
 
     /// <summary>青色护盾（技能3）是否生效中：3 秒无敌，可抵挡投技。</summary>
@@ -556,10 +748,28 @@ public partial class Player : CharacterBody2D
         if (IsShieldActive()) { OnShieldBlock(); return; }
         if (_hp <= 0) return;
         _hp -= amount;
+        if (_hp <= 0)
+        {
+            if (HasCard("pardon") && !_pardonUsed)   // 特赦令：致命伤免死（锁 1 血 + 3s 青盾），每场 1 次
+            {
+                _pardonUsed = true;
+                _hp = 1;
+                _shieldTimer = Mathf.Max(_shieldTimer, 3f);
+                if (_shield3 != null) _shield3.Visible = true;
+                ShowPopup("特赦!", new Color(0.3f, 1f, 0.95f));
+                RuleManager.Instance?.PlaySFX("vacuum_start");
+            }
+            else
+            {
+                RuleManager.Instance?.PlaySFX("player_hurt");
+                EmitSignal(SignalName.HealthChanged, _hp, MaxHp);
+                EmitSignal(SignalName.Died);
+                return;
+            }
+        }
+        _invuln = 0.5f;
         RuleManager.Instance?.PlaySFX("player_hurt");
         EmitSignal(SignalName.HealthChanged, _hp, MaxHp);
-        if (_hp <= 0) { EmitSignal(SignalName.Died); return; }
-        _invuln = 0.5f;
     }
 
     private void ShowPopup(string text, Color color)

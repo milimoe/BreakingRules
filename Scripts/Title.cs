@@ -199,12 +199,12 @@ public partial class Title : Control
         // 窗口面板：手动锚点居中于屏幕中心（不用 Container，避免子节点尺寸被布局
         // 覆盖导致窗口偏移——CenterContainer 只认 CustomMinimumSize，忽略手动 Size）。
         var win = new Panel();
-        win.CustomMinimumSize = new Vector2(680f, 460f);
+        win.CustomMinimumSize = new Vector2(700f, 500f);
         win.AnchorLeft = win.AnchorRight = win.AnchorTop = win.AnchorBottom = 0.5f;
-        win.OffsetLeft = -340f;
-        win.OffsetRight = 340f;
-        win.OffsetTop = -230f;
-        win.OffsetBottom = 230f;
+        win.OffsetLeft = -350f;
+        win.OffsetRight = 350f;
+        win.OffsetTop = -250f;
+        win.OffsetBottom = 250f;
         win.MouseFilter = Control.MouseFilterEnum.Stop;
         var ws = new StyleBoxFlat();
         ws.BgColor = new Color(0.09f, 0.07f, 0.15f, 0.98f);
@@ -310,6 +310,15 @@ public partial class Title : Control
             "· BOSS 会不断颁布规则：禁跳 / 禁武 / 限速。规则可能升级为「全图生效」或「跟随你移动」。\n" +
             "· 走到规则区，长按 Q 划除规则，将其反转成弹簧，并开启真空期（攻击×3、移速×2）。\n" +
             "· 击败每一层法官，向上一层发起挑战；打穿最终 BOSS「终裁者」后开启无尽模式。\n\n" +
+            "【能量条与大招】\n" +
+            "· 能量上限 50：造成伤害、防御成功、消除规则都会积攒能量。\n" +
+            "· 能量充满后，按 F 循环切换三种大招，长按 E（约 0.6 秒）释放。\n" +
+            "· 乱刀斩（重创）/ 闪现斩（眩晕）/ 时间怀表（持续回血），各自独立冷却（20 / 18 / 25 秒）。\n" +
+            "· 能量值与大招选择会继承到下一关。\n\n" +
+            "【卡牌系统】\n" +
+            "· 第 3 关起，每通过一关可从随机抽出的 3 张卡中选取 1 张（卡池每次随机抽取，不固定顺序）。\n" +
+            "· 最多持有 5 张；满 5 张后再选取，将替换你已持有的一张。\n" +
+            "· 卡牌分攻击、防御、蓄力、机制四类，按流派自由搭配，强化你的破规之路。\n\n" +
             "记住——规则就是用来打破的。";
     }
 
@@ -323,6 +332,7 @@ public partial class Title : Control
             "防御（按住 S）：BOSS 攻击前红色描边闪烁预警；防御中完全抵挡 BOSS 伤害，但不可移动/攻击\n" +
             "技能 1 毁灭直线 / 2 八向射线（各消耗 1 技能点，地图随机掉落宝珠获取）\n" +
             "技能 3 青色护盾（3 秒无敌，可抵挡投技）/ 4 自我治愈（+2 HP）\n" +
+            "大招：F 切换选中，长按 E 释放（需能量充满；乱刀斩CD20s / 闪现斩CD18s / 时间怀表CD25s）\n" +
             "规则条文可能全图生效或跟随你（标注【全图】/【跟随】），走到消除区长按 Q 划除。\n" +
             "本游戏的操作说明也是规则，但你不需要遵守它们。";
     }

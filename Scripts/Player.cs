@@ -146,6 +146,7 @@ public partial class Player : CharacterBody2D
         _strikeBar.Visible = false;
         AddChild(_strikeBar);
         _camera = GetNode<Camera2D>("Camera2D");
+        Juice.Instance?.RegisterCamera(_camera);   // 把相机交给统一反馈中枢抖动
         // 单屏竞技场：把相机限位框设为整个 960x540 场地。
         // 视口尺寸正好等于限位框 -> 相机被锁死、静止不滚动。
         // 注意：不能把左右/上下都设成同一个值（0 宽），那样 Godot 无法满足
@@ -235,6 +236,7 @@ public partial class Player : CharacterBody2D
                 _saltBuff = 2f;
                 ShowPopup("违规！", Colors.Red);
                 Shake();
+                Juice.Instance?.FlashEdge(Colors.Red, 0.3f);   // 违令而行：屏幕边缘刺痛红闪
                 RuleManager.Instance?.PlaySFX("violation");
                 if (!HasCard("salt"))
                     Velocity = new Vector2(Velocity.X, 0);  // 不持有「伤口撒盐」：取消起跳（被禁跳拦住）
@@ -264,6 +266,7 @@ public partial class Player : CharacterBody2D
                 _saltBuff = 2f;
                 ShowPopup("违规！", Colors.Red);
                 Shake();
+                Juice.Instance?.FlashEdge(Colors.Red, 0.3f);   // 违令而行：屏幕边缘刺痛红闪
                 RuleManager.Instance?.PlaySFX("violation");
             }
             else
@@ -339,7 +342,12 @@ public partial class Player : CharacterBody2D
             while (_regenAccum >= 1f)
             {
                 _regenAccum -= 1f;
-                if (_hp < MaxHp) { _hp++; EmitSignal(SignalName.HealthChanged, _hp, MaxHp); }
+                if (_hp < MaxHp)
+                {
+                    _hp++;
+                    EmitSignal(SignalName.HealthChanged, _hp, MaxHp);
+                    Juice.Instance?.FlashEdge(new Color(0.4f, 0.95f, 0.5f), 0.22f);   // 时间怀表回血：边缘绿闪
+                }
             }
         }
 
@@ -379,6 +387,9 @@ public partial class Player : CharacterBody2D
                 b.AddDespise();   // 蔑视之刃：普攻命中叠加蔑视
                 b.TakeDamage(dealt);
             }
+        // 普攻命中顿帧（0.05s）+ 双向轻震：模拟「受力」的打击感
+        Juice.Instance?.HitStop(0.05f);
+        Juice.Instance?.Shake(6f, 0.12f, Juice.ShakeAxis.Both);
         GainEnergyForDamage(dealt);
     }
 
@@ -417,28 +428,43 @@ public partial class Player : CharacterBody2D
         switch (idx)
         {
             case 0: // 乱刀斩：原地重击 BOSS 12 点
-                if (boss != null && IsInstanceValid(boss)) boss.TakeDamage(ComputeAttackDamage(12f));
+                if (boss != null && IsInstanceValid(boss))
+                {
+                    boss.TakeDamage(ComputeAttackDamage(12f));
+                    Juice.Instance?.HitStop(0.18f);                  // 爆气大招命中顿帧
+                    Juice.Instance?.Shake(14f, 0.4f, Juice.ShakeAxis.Horizontal);   // 乱刀斩：高频横向抖动
+                    Juice.Instance?.AfterImage(_sprite,
+                        _sprite.SpriteFrames.GetFrameTexture(_sprite.Animation, _sprite.Frame),
+                        Colors.Red, 4, 0.3f);   // 释放瞬间撕裂残影
+                }
                 ShowPopup("乱刀斩!", Colors.Gold);
                 break;
             case 1: // 闪现斩：瞬移到 BOSS 身后，造成 8 点并击倒 + 2s 眩晕
                 if (boss != null && IsInstanceValid(boss))
                 {
+                    Juice.Instance?.Shake(12f, 0.22f, Juice.ShakeAxis.Vertical);  // 闪现出现：纵向抖动
                     Vector2 behind = boss.GlobalPosition + new Vector2(boss.GlobalPosition.X < 480f ? 70f : -70f, 0f);
                     GlobalPosition = new Vector2(Mathf.Clamp(behind.X, 16f, 944f), boss.GlobalPosition.Y);
                     boss.TakeDamage(ComputeAttackDamage(8f));
                     boss.ApplyStun(2f);
+                    Juice.Instance?.HitStop(0.18f);                  // 背刺命中顿帧
+                    Juice.Instance?.Shake(12f, 0.26f, Juice.ShakeAxis.Horizontal); // 背刺命中：横向抖动
+                    Juice.Instance?.AfterImage(_sprite,
+                        _sprite.SpriteFrames.GetFrameTexture(_sprite.Animation, _sprite.Frame),
+                        new Color(0.5f, 0.95f, 1f), 4, 0.3f);
                 }
                 ShowPopup("闪现斩!", Colors.Gold);
                 break;
-            case 2: // 时间怀表：每秒回复 1 点生命，持续 7 秒
+            case 2: // 时间怀表：每秒回复 1 点生命，持续 7 秒（无顿帧，柔绿反馈）
                 _regenT = 7f;
                 _regenAccum = 0f;
+                Juice.Instance?.Shake(5f, 0.25f, Juice.ShakeAxis.Both);
+                Juice.Instance?.FlashEdge(new Color(0.4f, 0.95f, 0.5f), 0.35f);
                 ShowPopup("时间怀表!", new Color(0.5f, 0.9f, 1f));
                 break;
         }
         _ultCd[idx] = UltCdMax[idx];   // 释放后进入独立冷却（与能量消耗无关）
         RuleManager.Instance?.PlaySFX("vacuum_start");
-        Shake();
     }
 
     /// <summary>用 Players/Tiles/tile_0000~0007 八张同角色图构建 SpriteFrames：
@@ -512,9 +538,11 @@ public partial class Player : CharacterBody2D
         Shake();
         RuleManager.Instance.PlaySFX("paper_tear");
         RuleManager.Instance.StrikeRule(nearest);
+        Juice.Instance?.HitStop(0.06f);             // 成功消除规则：一顿微帧
+        Juice.Instance?.FlashEdge(Colors.Gold, 0.3f);   // 金边闪光：规则崩坏瞬间
         GainEnergy(10);                          // 消除规则 +10 能量（基础）
         if (HasCard("lightning")) GainEnergy(10);// 闪电宣读：消除额外 +10 能量
-        if (HasCard("chain")) CastRayFree(0.5f); // 连锁违宪：消除后免费释放 50% 八向射线
+        if (HasCard("chain")) { CastRayFree(0.5f); ShowPopup("连锁违宪!", new Color(0.5f, 0.9f, 1f)); } // 卡牌被动浮空提示
     }
 
     private void CancelStrike()
@@ -569,10 +597,13 @@ public partial class Player : CharacterBody2D
         var boss = GetTree().GetFirstNodeInGroup("boss") as Boss;
         int dealt = ComputeAttackDamage(Skill1Damage);
         if (boss != null && IsInstanceValid(boss) && Mathf.Abs(boss.GlobalPosition.Y - py) < Skill1Band)
+        {
             boss.TakeDamage(dealt);
+            Juice.Instance?.HitStop(0.1f);   // 1 技能命中顿帧
+            Juice.Instance?.Shake(9f, 0.2f, Juice.ShakeAxis.Both);
+        }
         GainEnergyForDamage(dealt);
         RuleManager.Instance?.PlaySFX("vacuum_start");
-        Shake();
     }
 
     /// <summary>技能2 / 申辩 / 连锁违宪 共用：以角色为中心向 8 方向释放射线（dmgMul 默认 1；申辩=1、连锁违宪=0.5）。</summary>
@@ -599,8 +630,9 @@ public partial class Player : CharacterBody2D
     private void CastSkill2()
     {
         CastRayFree(1f);
+        Juice.Instance?.HitStop(0.1f);   // 2 技能命中顿帧
+        Juice.Instance?.Shake(9f, 0.2f, Juice.ShakeAxis.Both);
         RuleManager.Instance?.PlaySFX("vacuum_start");
-        Shake();
     }
 
     /// <summary>技能3：青色护盾——3 秒无敌（可抵挡投技），14 秒 CD。</summary>
@@ -621,7 +653,7 @@ public partial class Player : CharacterBody2D
         ShowPopup("+2", new Color(0.4f, 1f, 0.5f));
         RuleManager.Instance?.PlaySFX("fall-a");   // 治愈类音效
         Shake();
-        if (HasCard("plea")) CastRayFree(1f);       // 申辩：治愈时免费释放一次八向射线
+        if (HasCard("plea")) { CastRayFree(1f); ShowPopup("申辩!", new Color(0.5f, 0.9f, 1f)); } // 卡牌被动浮空提示
     }
 
     /// <summary>在世界坐标下生成一条短暂存在的光束（Line2D，淡出后释放）。</summary>
@@ -687,6 +719,8 @@ public partial class Player : CharacterBody2D
         if (IsShieldActive()) { OnShieldBlock(); return; }   // 青色护盾：3 秒无敌，优先于一切 BOSS 伤害
         if (IsGuarding) { OnGuardBlock(); return; }   // 防御优先：无视无敌帧，按住 S 即生效
         if (_invuln > 0f) return;
+        Juice.Instance?.Shake(8f, 0.25f, Juice.ShakeAxis.Both);          // 受 BOSS 伤害：冲击震动
+        Juice.Instance?.FlashEdge(new Color(1f, 0.3f, 0.3f), 0.25f, 0.6f); // 受击边缘红闪
         _hp -= amount;
         if (_hp <= 0)
         {
@@ -720,6 +754,8 @@ public partial class Player : CharacterBody2D
 
     private void OnGuardBlock()
     {
+        Juice.Instance?.HitStop(0.08f);                          // 防御成功顿帧
+        Juice.Instance?.Shake(4f, 0.1f, Juice.ShakeAxis.Both);  // 防御成功轻微震动
         ShowPopup("格挡!", new Color(0.5f, 0.8f, 1f));
         RuleManager.Instance?.PlaySFX("vacuum_start");
         GainEnergy(2);   // 成功防御 +2 能量
@@ -767,6 +803,7 @@ public partial class Player : CharacterBody2D
                 return;
             }
         }
+        Juice.Instance?.BigHit(1.2f, new Color(1f, 0.2f, 0.2f));   // 投技命中：剧烈震动 + 裂痕
         _invuln = 0.5f;
         RuleManager.Instance?.PlaySFX("player_hurt");
         EmitSignal(SignalName.HealthChanged, _hp, MaxHp);
@@ -790,10 +827,7 @@ public partial class Player : CharacterBody2D
 
     private void Shake()
     {
-        if (_camera == null) return;
-        var t = CreateTween();
-        t.TweenProperty(_camera, "offset", new Vector2(6f, 0f), 0.05f);
-        t.TweenProperty(_camera, "offset", new Vector2(-6f, 0f), 0.05f);
-        t.TweenProperty(_camera, "offset", Vector2.Zero, 0.05f);
+        // 统一收口到 Juice 的有方向 trauma 震动（默认中等双向）
+        Juice.Instance?.Shake(6f, 0.14f, Juice.ShakeAxis.Both);
     }
 }

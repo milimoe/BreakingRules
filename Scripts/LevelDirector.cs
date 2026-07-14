@@ -90,6 +90,7 @@ public partial class LevelDirector : Node2D
 
     private void Win()
     {
+        Juice.Instance?.CancelHitStop();   // 作废进行中的顿帧，避免误解除本永久暂停
         _ended = true;
         _canNext = true;
         RuleManager.Instance?.PlaySFX("win");
@@ -114,6 +115,7 @@ public partial class LevelDirector : Node2D
 
     private void Lose()
     {
+        Juice.Instance?.CancelHitStop();   // 作废进行中的顿帧，避免误解除本永久暂停
         _ended = true;
         _canNext = false;
         string stats = StatsLine(false);
@@ -275,6 +277,7 @@ public partial class LevelDirector : Node2D
 
     private void PauseGame()
     {
+        Juice.Instance?.CancelHitStop();   // 作废进行中的顿帧，避免 ESC 暂停期间误解除
         _paused = true;
         GetTree().Paused = true; // 冻结游戏（BGM 因 Always 仍播放）
         _pauseLayer.Visible = true;
@@ -282,6 +285,7 @@ public partial class LevelDirector : Node2D
 
     private void ResumeGame()
     {
+        Juice.Instance?.CancelHitStop();   // 清理可能残留的顿帧计时
         _paused = false;
         GetTree().Paused = false;
         _pauseLayer.Visible = false;
@@ -407,6 +411,7 @@ public partial class LevelDirector : Node2D
 
     private void OnNext()
     {
+        Juice.Instance?.CancelHitStop();   // 清理可能残留的顿帧计时
         if (!_ended) return;
         _ended = false;
         // 跨关继承：先暂存当前玩家生命与技能点，重载后 Player._Ready 据此恢复
@@ -426,6 +431,7 @@ public partial class LevelDirector : Node2D
 
     private void OnRestart()
     {
+        Juice.Instance?.CancelHitStop();   // 清理可能残留的顿帧计时
         if (!_ended) return;
         _ended = false;
         RunState.Instance?.StartNewRun();
@@ -437,6 +443,7 @@ public partial class LevelDirector : Node2D
     /// 否则标题界面会继承暂停状态。BGM 为全局循环，不在此停止。</summary>
     private void OnReturnToTitle()
     {
+        Juice.Instance?.CancelHitStop();   // 作废进行中的顿帧，切场景前清理
         _ended = false;
         _paused = false;
         if (_cardViewOpen) CloseCardView();
@@ -475,6 +482,7 @@ public partial class LevelDirector : Node2D
     // ---------- 卡牌选择浮层（第 3 关起每关开局） ----------
     private void ShowCardPicker()
     {
+        Juice.Instance?.CancelHitStop();   // 作废进行中的顿帧，避免开局选牌暂停期间误解除
         if (RunState.Instance == null) return;
         _cardPicking = true;
         GetTree().Paused = true;   // 开局暂停，玩家选牌

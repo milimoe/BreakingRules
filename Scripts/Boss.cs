@@ -557,6 +557,10 @@ public partial class Boss : CharacterBody2D
         _gcts?.Cancel();
         _gcts = new CancellationTokenSource();
         var token = _gcts.Token;
+        // 投技强力反馈：顿帧 + 视角聚焦（相机放大） + 剧烈震动，让玩家感到真的被击中
+        Juice.Instance?.HitStop(0.18f);
+        Juice.Instance?.FocusPunch();
+        Juice.Instance?.Shake(14f, 0.5f, Juice.ShakeAxis.Both);
         try
         {
             if (_target != null && IsInstanceValid(_target)) _target.SetFrozen(true);
@@ -640,6 +644,14 @@ public partial class Boss : CharacterBody2D
         t.TweenProperty(_sprite, "modulate", Colors.White, 0.06f);
         t.TweenProperty(_sprite, "modulate", _baseTint, 0.06f);
         RuleManager.Instance?.PlaySFX("boss_hit");
+        // 大数字伤害（如大招 8/12）：夸张受击 —— 剧烈震动 + 边缘闪 + 残影撕裂
+        if (amount >= 8)
+        {
+            Juice.Instance?.BigHit(1.0f, new Color(1f, 0.85f, 0.3f));
+            Juice.Instance?.AfterImage(_sprite,
+                _sprite.SpriteFrames.GetFrameTexture(_sprite.Animation, _sprite.Frame),
+                Colors.White, 3, 0.25f);
+        }
         if (_hp <= 0)
         {
             _cts?.Cancel();     // 取消进行中的攻击序列

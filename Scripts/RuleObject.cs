@@ -134,7 +134,12 @@ public partial class RuleObject : Node2D
             }
             _followRemaining -= (float)delta;
             if (_countdown != null) _countdown.Text = $"{Mathf.Ceil(Mathf.Max(0f, _followRemaining))}";
-            if (_followRemaining <= 0f && _countdown != null) _countdown.Visible = false;
+            // 倒计时归零：跟随规则整体消失（与全图规则分支一致），不再定格残留
+            if (_followRemaining <= 0f)
+            {
+                QueueFree();
+                return;
+            }
         }
     }
 

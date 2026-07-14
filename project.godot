@@ -19,12 +19,14 @@ config/dotnet/namespace="BreakingRules"
 
 RuleManager="*res://Scripts/RuleManager.cs"
 RunState="*res://Scripts/RunState.cs"
+Juice="*res://Scripts/Juice.cs"
 
 [display]
 
 window/size/viewport_width=960
 window/size/viewport_height=540
 window/stretch/mode="canvas_items"
+window/stretch/aspect="keep"
 
 [dotnet]
 

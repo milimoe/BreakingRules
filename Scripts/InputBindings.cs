@@ -75,7 +75,49 @@ public partial class InputBindings : Node
         cfg.Save(CfgPath);
     }
 
-    // 某 action 当前实际按键（取第一个事件的 physical keycode）。
+    // 默认绑定（与 project.godot 的 [input] 保持一致）：action -> physical keycode 列表。
+    // 用于「恢复默认」：清空已保存的自定义绑定并还原 InputMap 到出厂状态。
+    private static readonly Godot.Collections.Dictionary<string, int[]> Defaults = new()
+    {
+        ["move_left"]  = new[] { 65, 4194319 },  // A / ←
+        ["move_right"] = new[] { 68, 4194321 },  // D / →
+        ["jump"]       = new[] { 87, 4194320 },  // W / ↑
+        ["attack"]     = new[] { 32, 74 },       // Space / J
+        ["guard"]      = new[] { 83 },           // S
+        ["strike"]     = new[] { 81 },           // Q
+        ["skill1"]     = new[] { 49 },           // 1
+        ["skill2"]     = new[] { 50 },           // 2
+        ["skill3"]     = new[] { 51 },           // 3
+        ["skill4"]     = new[] { 52 },           // 4
+        ["ult_switch"] = new[] { 70 },           // F
+        ["ult_release"]= new[] { 69 },           // E
+    };
+
+    // 将某 action 重置为一组 physical keycode 事件（清空原有全部事件后逐个添加）。
+    public static void SetActionEvents(string action, int[] physicalKeycodes)
+    {
+        if (!InputMap.HasAction(action)) return;
+        foreach (InputEvent e in InputMap.ActionGetEvents(action))
+            InputMap.ActionEraseEvent(action, e);
+        foreach (var code in physicalKeycodes)
+            InputMap.ActionAddEvent(action, new InputEventKey { PhysicalKeycode = (Key)code });
+    }
+
+    // 恢复全部默认绑定：还原 InputMap，并清除已保存的自定义绑定（下次启动沿用 project.godot 默认）。
+    public static void ResetToDefaults()
+    {
+        foreach (var kv in Defaults)
+            SetActionEvents(kv.Key, kv.Value);
+        var cfg = new ConfigFile();
+        if (cfg.Load(CfgPath) == Error.Ok && cfg.HasSection("bindings"))
+        {
+            cfg.EraseSection("bindings");
+            cfg.Save(CfgPath);
+        }
+    }
+
+    // 某 action 当前实际按键（取第一个事件的 physical keycode）。使用 GetKeyLabel 才能正确
+    // 渲染 physical keycode（与布局无关），避免 PhysicalKeycode 被当成逻辑 keycode 误显示。
     public static string KeyLabel(string action)
     {
         foreach (var e in InputMap.ActionGetEvents(action))

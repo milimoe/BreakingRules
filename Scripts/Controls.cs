@@ -33,9 +33,9 @@ public partial class Controls : Panel
     private void SyncKeyLabels()
     {
         if (_content == null) return;
-        SetLine("Move",   "移动：" + InputBindings.KeyLabels("move_left") + " / " + InputBindings.KeyLabels("move_right"));
-        SetLine("Jump",   "跳跃：" + InputBindings.KeyLabels("jump"));
-        SetLine("Attack", "攻击 Boss：" + InputBindings.KeyLabels("attack"));
+        SetLine("Move",   "移动：" + InputBindings.KeyLabel("move_left") + " / " + InputBindings.KeyLabel("move_right"));
+        SetLine("Jump",   "跳跃：" + InputBindings.KeyLabel("jump"));
+        SetLine("Attack", "攻击 Boss：" + InputBindings.KeyLabel("attack"));
         SetLine("Strike", "划除条文（长按 " + InputBindings.KeyLabel("strike") + " 约1秒，任意键取消；5秒冷却）");
         SetLine("Guard",  "防御（按住 " + InputBindings.KeyLabel("guard") + "，完全抵挡 BOSS 伤害；防御中不可移动/攻击）");
         SetLine("Skill",  "技能：" + InputBindings.KeyLabel("skill1") + " 毁灭直线 / " + InputBindings.KeyLabel("skill2") + " 八向射线");

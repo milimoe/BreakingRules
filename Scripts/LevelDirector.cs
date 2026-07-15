@@ -89,7 +89,18 @@ public partial class LevelDirector : Node2D
 
     private void OnBossDied()
     {
-        if (!_ended) Win();
+        if (_ended) return;
+        _ended = true;   // 先锁，避免演出期间 ESC / 重入触发暂停
+        // 死亡演出：放慢游戏速度 + 镜头拉近 BOSS，结束后再弹结算（不直接暂停）。
+        // 用 Engine.TimeScale 做慢动作（非 Paused），故 Tween / 浮字 / 镜头都随之慢放，更有戏剧感。
+        Engine.TimeScale = 0.35f;
+        var boss = GetTree().GetFirstNodeInGroup("boss") as Boss;
+        Vector2 bossPos = boss != null && IsInstanceValid(boss) ? boss.GlobalPosition : new Vector2(480f, 270f);
+        Juice.Instance?.BossDeathCinematic(bossPos, () =>
+        {
+            Engine.TimeScale = 1.0f;   // 还原时间缩放（须在 Paused 前）
+            Win();
+        });
     }
 
     private void Win()

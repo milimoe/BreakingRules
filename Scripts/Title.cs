@@ -15,6 +15,7 @@ public partial class Title : Control
     private Label _resLabel;         // 设置面板：当前分辨率
     private Label _volLabel;         // 设置面板：当前音量
     private Godot.Collections.Dictionary<string, Label> _bindLabels = new();  // action -> 当前按键 Label
+    private Godot.Collections.Dictionary<string, Button> _cancelButtons = new();  // action -> 听键时的【取消】按钮
     private bool _listening = false;  // 是否处于「听键」状态
     private string _listeningAction;  // 正在重绑的 action
     private Button _listeningBtn;     // 正在闪烁的「重新绑定」按钮
@@ -413,14 +414,19 @@ public partial class Title : Control
         volRow.AddChild(_volLabel);
         volRow.AddChild(MakeButton("＋", Vector2.Zero, 46f, 40f, () => StepVolume(1)));
 
-        // 分隔标题
+        // 分隔标题行：标题 + 恢复默认按钮
+        var rebindHeader = new HBoxContainer();
+        rebindHeader.AddThemeConstantOverride("separation", 8);
         var sepCap = new Label();
         sepCap.Text = "操作按键";
         sepCap.AddThemeFontSizeOverride("font_size", 18);
         sepCap.Modulate = new Color(1f, 0.85f, 0.4f);
-        col.AddChild(sepCap);
+        sepCap.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        rebindHeader.AddChild(sepCap);
+        rebindHeader.AddChild(MakeButton("恢复默认", Vector2.Zero, 110f, 34f, ResetBindings));
+        col.AddChild(rebindHeader);
 
-        // 改键行（每行：动作名 + 当前键 + 重新绑定按钮）
+        // 改键行（每行：动作名 + 当前键 + 重新绑定按钮 + 听键时出现的【取消】按钮）
         foreach (var (disp, act) in InputBindings.Rebindable)
         {
             var row = new HBoxContainer();
@@ -447,11 +453,17 @@ public partial class Title : Control
             btn.Pressed += () => BeginRebind(act, btn);
             row.AddChild(btn);
 
+            var cancelBtn = MakeButton("取消", Vector2.Zero, 70f, 36f, () => { });
+            cancelBtn.Visible = false;   // 仅在听键中出现，避免常驻占用空间
+            cancelBtn.Pressed += CancelRebind;
+            row.AddChild(cancelBtn);
+            _cancelButtons[act] = cancelBtn;
+
             col.AddChild(row);
         }
 
         var hint = new Label();
-        hint.Text = "分辨率 / 音量 / 按键实时生效并自动保存 · 点「重新绑定」后按任意键 · 按 Esc 关闭";
+        hint.Text = "分辨率 / 音量 / 按键实时生效并自动保存 · 点「重新绑定」后按任意键（【取消】或 Esc 取消）· 【恢复默认】还原全部按键 · Esc 关闭";
         hint.AddThemeFontSizeOverride("font_size", 13);
         hint.Modulate = new Color(0.6f, 0.56f, 0.72f);
         hint.AutowrapMode = TextServer.AutowrapMode.Word;
@@ -500,6 +512,37 @@ public partial class Title : Control
         _listeningBtn = btn;
         btn.Text = "按任意键…";
         btn.Modulate = new Color(1f, 0.6f, 0.3f);
+        if (_cancelButtons.TryGetValue(action, out var cb)) cb.Visible = true;
+    }
+
+    // 取消当前听键（不改动绑定），恢复按钮与【取消】按钮状态。
+    private void CancelRebind()
+    {
+        if (!_listening) return;
+        _listening = false;
+        if (_listeningBtn != null)
+        {
+            _listeningBtn.Text = "重新绑定";
+            _listeningBtn.Modulate = Colors.White;
+        }
+        if (_listeningAction != null && _cancelButtons.TryGetValue(_listeningAction, out var cb))
+            cb.Visible = false;
+        _listeningAction = null;
+        _listeningBtn = null;
+    }
+
+    // 恢复全部按键到默认，并刷新面板显示。
+    private void ResetBindings()
+    {
+        InputBindings.ResetToDefaults();
+        RefreshBindLabels();
+    }
+
+    // 刷新所有「当前按键」Label 为最新绑定。
+    private void RefreshBindLabels()
+    {
+        foreach (var kv in _bindLabels)
+            kv.Value.Text = InputBindings.KeyLabel(kv.Key);
     }
 
     private void CycleResolution(int dir)
@@ -548,9 +591,9 @@ public partial class Title : Control
     private static string ControlsText()
     {
         return
-            "移动：" + InputBindings.KeyLabels("move_left") + " / " + InputBindings.KeyLabels("move_right") + "（部分规则下左右反转）\n" +
-            "跳跃：" + InputBindings.KeyLabels("jump") + "\n" +
-            "攻击 Boss：" + InputBindings.KeyLabels("attack") + "\n" +
+            "移动：" + InputBindings.KeyLabel("move_left") + " / " + InputBindings.KeyLabel("move_right") + "（部分规则下左右反转）\n" +
+            "跳跃：" + InputBindings.KeyLabel("jump") + "\n" +
+            "攻击 Boss：" + InputBindings.KeyLabel("attack") + "\n" +
             "划除条文：长按 " + InputBindings.KeyLabel("strike") + " 约 1 秒（期间按任意键或松手取消，不进入冷却；完成进 5 秒冷却）\n" +
             "防御（按住 " + InputBindings.KeyLabel("guard") + "）：BOSS 攻击前红色描边闪烁预警；防御中完全抵挡 BOSS 伤害，但不可移动/攻击\n" +
             "技能 " + InputBindings.KeyLabel("skill1") + " 毁灭直线 / " + InputBindings.KeyLabel("skill2") + " 八向射线（各消耗 1 技能点，地图随机掉落宝珠获取）\n" +
@@ -574,6 +617,13 @@ public partial class Title : Control
         // 听键中：捕获下一个按键，重绑并持久化，消费事件避免误触暂停/关闭
         if (_listening && @event is InputEventKey key && key.Pressed && !key.Echo)
         {
+            // Esc 视为取消本次重绑，避免把 Esc 本身绑成动作键
+            if (key.Keycode == Key.Escape)
+            {
+                CancelRebind();
+                GetViewport().SetInputAsHandled();
+                return;
+            }
             int code = (int)key.PhysicalKeycode;
             InputBindings.ApplyAction(_listeningAction, code);
             InputBindings.SaveBinding(_listeningAction, code);
@@ -584,6 +634,8 @@ public partial class Title : Control
                 _listeningBtn.Text = "重新绑定";
                 _listeningBtn.Modulate = Colors.White;
             }
+            if (_listeningAction != null && _cancelButtons.TryGetValue(_listeningAction, out var cb))
+                cb.Visible = false;
             _listening = false;
             _listeningAction = null;
             _listeningBtn = null;

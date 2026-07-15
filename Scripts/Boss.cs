@@ -119,6 +119,7 @@ public partial class Boss : CharacterBody2D
     {
         RefreshTarget();
         if (_target == null) return;
+        if (_hp <= 0) return;   // 尸体定格：死亡后不再移动 / 抽攻击，供慢动作演出
         float d = (float)delta;
 
         // 眩晕（闪现斩）：击倒、冻结一切行动与靠近，⌛ 图标常驻；归零复位。
@@ -640,6 +641,7 @@ public partial class Boss : CharacterBody2D
         int eff = (int)Mathf.Round(amount * mult);
         _hp -= eff;
         EmitSignal(SignalName.HealthChanged, _hp, MaxHp);
+        SpawnDamageText(eff);   // 受击浮字：小字红伤，>20 放大
         var t = CreateTween();
         t.TweenProperty(_sprite, "modulate", Colors.White, 0.06f);
         t.TweenProperty(_sprite, "modulate", _baseTint, 0.06f);
@@ -701,5 +703,31 @@ public partial class Boss : CharacterBody2D
         t.TweenProperty(lbl, "position:y", -90f, 0.6f);
         t.Parallel().TweenProperty(lbl, "modulate:a", 0f, 0.6f);
         t.TweenCallback(Callable.From(() => lbl.QueueFree()));
+    }
+
+    /// <summary>受击伤害浮字：在 BOSS 旁生成红色伤害数字，向上飘升并淡出。
+    /// amount &gt; 20 时放大显示（大招 / 暴怒加伤等夸张数字）。随树暂停（Tween 随树），
+    /// 但死亡演出用 Engine.TimeScale 慢放而非暂停，故击杀瞬间浮字也会在慢动作中飘出。</summary>
+    private void SpawnDamageText(int amount)
+    {
+        var scene = GetTree().CurrentScene;
+        if (scene == null) return;
+        bool big = amount > 20;
+        var lbl = new Label();
+        lbl.Text = amount.ToString();
+        lbl.AddThemeFontSizeOverride("font_size", big ? 40 : 20);
+        lbl.HorizontalAlignment = HorizontalAlignment.Center;
+        lbl.VerticalAlignment = VerticalAlignment.Center;
+        lbl.Modulate = big ? new Color(1f, 0.35f, 0.25f) : new Color(1f, 0.15f, 0.15f);
+        lbl.ZIndex = 60;
+        // 随机水平偏移，避免连续受击叠字
+        float ox = (float)GD.RandRange(-26f, 26f);
+        float oy = (float)GD.RandRange(-10f, 10f);
+        lbl.GlobalPosition = new Vector2(GlobalPosition.X + ox, GlobalPosition.Y - 56f + oy);
+        scene.AddChild(lbl);
+        var tw = CreateTween();
+        tw.TweenProperty(lbl, "global_position:y", lbl.GlobalPosition.Y - (big ? 90f : 54f), 0.7f);
+        tw.Parallel().TweenProperty(lbl, "modulate:a", 0f, 0.7f);
+        tw.TweenCallback(Callable.From(() => lbl.QueueFree()));
     }
 }

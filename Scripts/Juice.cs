@@ -280,4 +280,51 @@ public partial class Juice : Node
         tw.TweenProperty(poly, "modulate:a", 0f, 0.20f);
         tw.TweenCallback(Callable.From(() => poly.QueueFree()));
     }
+
+    // ------------------------------------------------------------------
+    // BOSS 死亡镜头演出：拉近并放大到 BOSS，停留一拍，再缓缓还原。
+    // 由 LevelDirector 在设置 Engine.TimeScale（慢动作）后调用；本方法只负责相机，
+    // 不碰暂停，故演出期间游戏仍处于慢放而非冻结，画面更有「终结一击」的戏剧感。
+    // 相机限位临时放开以便居中到 BOSS（单屏竞技场默认限位等于视口，无法居中）。
+    // 注：Tween 受 Engine.TimeScale 影响 -> 与慢动作同步放慢，正是想要的「缓缓拉近」。
+    // ------------------------------------------------------------------
+    public async void BossDeathCinematic(Vector2 bossPos, System.Action onDone)
+    {
+        var cam = _cam;
+        if (cam == null || !IsInstanceValid(cam))
+        {
+            onDone?.Invoke();
+            return;
+        }
+        float z0 = cam.Zoom.X;
+        Vector2 p0 = cam.GlobalPosition;
+        bool smooth = cam.PositionSmoothingEnabled;
+        int L = cam.LimitLeft, R = cam.LimitRight, T = cam.LimitTop, B = cam.LimitBottom;
+        cam.PositionSmoothingEnabled = false;           // 直接驱动位置，避免平滑与 tween 打架
+        cam.LimitLeft = -1000; cam.LimitRight = 1960;
+        cam.LimitTop = -1000;  cam.LimitBottom = 1540;
+        cam.Offset = Vector2.Zero;
+
+        // 拉近并放大到 BOSS
+        var tw1 = CreateTween();
+        tw1.TweenProperty(cam, "global_position", bossPos, 0.45f);
+        tw1.Parallel().TweenProperty(cam, "zoom", new Vector2(1.5f, 1.5f), 0.45f);
+        await ToSignal(tw1, "finished");
+
+        // 放大态停留一拍（真实时间，不受慢动作延长观感）
+        await ToSignal(GetTree().CreateTimer(0.5f, true, false, true), "timeout");
+
+        // 缓缓还原镜头
+        var tw2 = CreateTween();
+        tw2.TweenProperty(cam, "global_position", p0, 0.45f);
+        tw2.Parallel().TweenProperty(cam, "zoom", new Vector2(z0, z0), 0.45f);
+        await ToSignal(tw2, "finished");
+
+        // 恢复相机原始约束
+        cam.LimitLeft = L; cam.LimitRight = R; cam.LimitTop = T; cam.LimitBottom = B;
+        cam.PositionSmoothingEnabled = smooth;
+        cam.Offset = Vector2.Zero;
+
+        onDone?.Invoke();
+    }
 }

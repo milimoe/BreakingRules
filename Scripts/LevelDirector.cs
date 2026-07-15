@@ -509,8 +509,8 @@ public partial class LevelDirector : Node2D
         _cardLayer.AddChild(dim);
 
         var panel = new Panel();
-        panel.Position = new Vector2(120f, 70f);
-        panel.Size = new Vector2(720f, 400f);
+        panel.Position = new Vector2(120f, 50f);
+        panel.Size = new Vector2(720f, 460f);
         var ps = new StyleBoxFlat();
         ps.BgColor = new Color(0.08f, 0.06f, 0.12f, 0.97f);
         ps.BorderColor = new Color(1f, 0.85f, 0.25f, 0.95f);
@@ -530,7 +530,7 @@ public partial class LevelDirector : Node2D
         // 可滚动卡片区：高度受限，卡片过多（换卡 5 张）时自动出现纵向滚动条
         _cardScroll = new ScrollContainer();
         _cardScroll.Position = new Vector2(40f, 56f);
-        _cardScroll.Size = new Vector2(640f, 250f);
+        _cardScroll.Size = new Vector2(640f, 312f);   // 高度足够完整显示 3 张卡（不滚）；换卡 5 张时自动出滚动条
         _cardScroll.HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled;
         _cardScroll.VerticalScrollMode = ScrollContainer.ScrollMode.Auto;
         panel.AddChild(_cardScroll);
@@ -543,7 +543,7 @@ public partial class LevelDirector : Node2D
 
         // 底部操作区（跳过 / 确认 / 取消），居中排布
         _cardActions = new HBoxContainer();
-        _cardActions.Position = new Vector2(40f, 318f);
+        _cardActions.Position = new Vector2(40f, 380f);
         _cardActions.Size = new Vector2(640f, 64f);
         _cardActions.AddThemeConstantOverride("separation", 24);
         _cardActions.Alignment = BoxContainer.AlignmentMode.Center;

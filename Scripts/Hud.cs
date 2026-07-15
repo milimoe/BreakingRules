@@ -91,6 +91,11 @@ public partial class Hud : Control
         _timerLabel.Position = new Vector2(12f, 510f);
         _timerLabel.AddThemeFontSizeOverride("font_size", 16);
         _timerLabel.Modulate = new Color(0.82f, 0.82f, 0.92f);
+        // 深色投影：避免与地形纹理重叠看不清（地形为浅色网格时尤其需要）
+        _timerLabel.AddThemeColorOverride("font_shadow_color", new Color(0f, 0f, 0f, 0.85f));
+        _timerLabel.AddThemeConstantOverride("font_shadow_offset_x", 2);
+        _timerLabel.AddThemeConstantOverride("font_shadow_offset_y", 2);
+        _timerLabel.AddThemeConstantOverride("font_shadow_outline_size", 2);
         AddChild(_timerLabel);
 
         if (_player != null)

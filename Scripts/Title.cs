@@ -118,12 +118,14 @@ public partial class Title : Control
         AddChild(intro);
     }
 
-    // ---------- 竖排按钮 ----------
+    // ---------- 2x2 网格按钮 ----------
     private void BuildButtons()
     {
         var labels = new[] { "开始游戏", "规则介绍", "设置", "退出游戏" };
-        float bw = 250f, bh = 48f, gap = 14f;
-        float x = (960f - bw) / 2f;
+        float bw = 220f, bh = 50f, colGap = 24f, rowGap = 18f;
+        int cols = 2;
+        float gridW = cols * bw + (cols - 1) * colGap;   // 2*220 + 24 = 464
+        float startX = (960f - gridW) / 2f;
         float startY = 344f;
         for (int i = 0; i < labels.Length; i++)
         {
@@ -132,7 +134,11 @@ public partial class Title : Control
                         : idx == 1 ? OpenRules
                         : idx == 2 ? OpenSettings
                         : QuitGame;
-            AddChild(MakeButton(labels[i], new Vector2(x, startY + i * (bh + gap)), bw, bh, act));
+            int col = i % cols;
+            int row = i / cols;
+            float px = startX + col * (bw + colGap);
+            float py = startY + row * (bh + rowGap);
+            AddChild(MakeButton(labels[i], new Vector2(px, py), bw, bh, act));
         }
     }
 

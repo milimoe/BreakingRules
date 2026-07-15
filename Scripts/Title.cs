@@ -11,9 +11,14 @@ namespace BreakingRules;
 public partial class Title : Control
 {
     private Control _rulesOverlay;   // 规则介绍弹窗根（遮罩+窗口），null = 未打开
+    private Control _settingsOverlay; // 设置弹窗根，null = 未打开
+    private Label _resLabel;         // 设置面板：当前分辨率
+    private Label _volLabel;         // 设置面板：当前音量
 
     public override void _Ready()
     {
+        Settings.Load();
+        Settings.ApplyResolution();   // 启动即套用上次保存的窗口分辨率
         BuildBackground();
         BuildTitle();
         BuildIntro();
@@ -113,18 +118,19 @@ public partial class Title : Control
         AddChild(intro);
     }
 
-    // ---------- 三个竖排按钮 ----------
+    // ---------- 竖排按钮 ----------
     private void BuildButtons()
     {
-        var labels = new[] { "开始游戏", "规则介绍", "退出游戏" };
-        float bw = 250f, bh = 52f, gap = 16f;
+        var labels = new[] { "开始游戏", "规则介绍", "设置", "退出游戏" };
+        float bw = 250f, bh = 48f, gap = 14f;
         float x = (960f - bw) / 2f;
-        float startY = 348f;
+        float startY = 344f;
         for (int i = 0; i < labels.Length; i++)
         {
             int idx = i;
             Action act = idx == 0 ? (Action)StartGame
                         : idx == 1 ? OpenRules
+                        : idx == 2 ? OpenSettings
                         : QuitGame;
             AddChild(MakeButton(labels[i], new Vector2(x, startY + i * (bh + gap)), bw, bh, act));
         }
@@ -298,6 +304,149 @@ public partial class Title : Control
         tw.TweenCallback(Callable.From(() => ov.QueueFree()));
     }
 
+    // ---------- 游戏设置弹窗 ----------
+    private void OpenSettings()
+    {
+        if (_settingsOverlay != null) return;
+
+        var overlay = new Control();
+        overlay.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+        overlay.MouseFilter = Control.MouseFilterEnum.Stop;
+
+        var dim = new ColorRect();
+        dim.Color = new Color(0f, 0f, 0f, 0.62f);
+        dim.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+        dim.MouseFilter = Control.MouseFilterEnum.Stop;
+        dim.GuiInput += (ev) =>
+        {
+            if (ev is InputEventMouseButton mb && mb.Pressed && mb.ButtonIndex == MouseButton.Left)
+                CloseSettings();
+        };
+        overlay.AddChild(dim);
+
+        var win = new Panel();
+        win.CustomMinimumSize = new Vector2(700f, 460f);
+        win.AnchorLeft = win.AnchorRight = win.AnchorTop = win.AnchorBottom = 0.5f;
+        win.OffsetLeft = -350f; win.OffsetRight = 350f;
+        win.OffsetTop = -230f; win.OffsetBottom = 230f;
+        win.MouseFilter = Control.MouseFilterEnum.Stop;
+        var ws = new StyleBoxFlat();
+        ws.BgColor = new Color(0.09f, 0.07f, 0.15f, 0.98f);
+        ws.BorderColor = new Color(0.85f, 0.7f, 0.4f, 1f);
+        ws.BorderWidthLeft = ws.BorderWidthTop = ws.BorderWidthRight = ws.BorderWidthBottom = 3;
+        ws.CornerRadiusTopLeft = ws.CornerRadiusTopRight =
+            ws.CornerRadiusBottomLeft = ws.CornerRadiusBottomRight = 12;
+        ws.ContentMarginLeft = ws.ContentMarginRight = 18;
+        ws.ContentMarginTop = ws.ContentMarginBottom = 18;
+        win.AddThemeStyleboxOverride("panel", ws);
+        overlay.AddChild(win);
+
+        var wtitle = new Label();
+        wtitle.Text = "游戏设置";
+        wtitle.AddThemeFontSizeOverride("font_size", 24);
+        wtitle.Modulate = new Color(1f, 0.85f, 0.4f);
+        wtitle.Position = new Vector2(20f, 14f);
+        wtitle.Size = new Vector2(520f, 34f);
+        win.AddChild(wtitle);
+
+        var close = new Button();
+        close.Text = "关闭 ✕";
+        close.Position = new Vector2(win.Size.X - 112f, 14f);
+        close.Size = new Vector2(94f, 34f);
+        close.AddThemeFontSizeOverride("font_size", 16);
+        close.FocusMode = Control.FocusModeEnum.None;
+        close.AddThemeStyleboxOverride("normal", MakeBtnStyle(false, false));
+        close.AddThemeStyleboxOverride("hover", MakeBtnStyle(true, false));
+        close.AddThemeColorOverride("font_color", new Color(0.96f, 0.94f, 1f));
+        WireButtonSfx(close);
+        close.Pressed += CloseSettings;
+        win.AddChild(close);
+
+        // 分辨率行
+        var resCap = new Label();
+        resCap.Text = "分辨率";
+        resCap.AddThemeFontSizeOverride("font_size", 18);
+        resCap.Modulate = new Color(0.92f, 0.92f, 0.98f);
+        resCap.Position = new Vector2(24f, 96f);
+        resCap.Size = new Vector2(120f, 34f);
+        win.AddChild(resCap);
+
+        win.AddChild(MakeButton("◀", new Vector2(160f, 92f), 46f, 40f, () => CycleResolution(-1)));
+        _resLabel = new Label();
+        _resLabel.Text = Settings.ResolutionLabel();
+        _resLabel.AddThemeFontSizeOverride("font_size", 18);
+        _resLabel.HorizontalAlignment = HorizontalAlignment.Center;
+        _resLabel.Modulate = new Color(1f, 0.9f, 0.5f);
+        _resLabel.Position = new Vector2(214f, 96f);
+        _resLabel.Size = new Vector2(232f, 34f);
+        win.AddChild(_resLabel);
+        win.AddChild(MakeButton("▶", new Vector2(456f, 92f), 46f, 40f, () => CycleResolution(1)));
+
+        // 主音量行
+        var volCap = new Label();
+        volCap.Text = "主音量";
+        volCap.AddThemeFontSizeOverride("font_size", 18);
+        volCap.Modulate = new Color(0.92f, 0.92f, 0.98f);
+        volCap.Position = new Vector2(24f, 168f);
+        volCap.Size = new Vector2(120f, 34f);
+        win.AddChild(volCap);
+
+        win.AddChild(MakeButton("－", new Vector2(160f, 164f), 46f, 40f, () => StepVolume(-1)));
+        _volLabel = new Label();
+        _volLabel.Text = Settings.VolumeLabel();
+        _volLabel.AddThemeFontSizeOverride("font_size", 18);
+        _volLabel.HorizontalAlignment = HorizontalAlignment.Center;
+        _volLabel.Modulate = new Color(1f, 0.9f, 0.5f);
+        _volLabel.Position = new Vector2(214f, 168f);
+        _volLabel.Size = new Vector2(232f, 34f);
+        win.AddChild(_volLabel);
+        win.AddChild(MakeButton("＋", new Vector2(456f, 164f), 46f, 40f, () => StepVolume(1)));
+
+        var hint = new Label();
+        hint.Text = "分辨率与音量实时生效并自动保存 · 按 Esc 关闭";
+        hint.AddThemeFontSizeOverride("font_size", 14);
+        hint.Modulate = new Color(0.6f, 0.56f, 0.72f);
+        hint.Position = new Vector2(24f, 408f);
+        hint.Size = new Vector2(652f, 28f);
+        win.AddChild(hint);
+
+        AddChild(overlay);
+        _settingsOverlay = overlay;
+
+        overlay.Modulate = new Color(1f, 1f, 1f, 0f);
+        var tw = CreateTween();
+        tw.TweenProperty(overlay, "modulate", new Color(1f, 1f, 1f, 1f), 0.18f);
+    }
+
+    private void CloseSettings()
+    {
+        if (_settingsOverlay == null) return;
+        var ov = _settingsOverlay;
+        _settingsOverlay = null;
+        var tw = CreateTween();
+        tw.TweenProperty(ov, "modulate", new Color(1f, 1f, 1f, 0f), 0.15f);
+        tw.TweenCallback(Callable.From(() => ov.QueueFree()));
+    }
+
+    private void CycleResolution(int dir)
+    {
+        Settings.ResolutionIndex += dir;
+        Settings.Clamp();
+        Settings.ApplyResolution();
+        Settings.Save();
+        if (_resLabel != null) _resLabel.Text = Settings.ResolutionLabel();
+    }
+
+    private void StepVolume(int dir)
+    {
+        Settings.MasterVolume += dir * 0.1f;
+        Settings.Clamp();
+        Settings.ApplyVolume();
+        Settings.Save();
+        if (_volLabel != null) _volLabel.Text = Settings.VolumeLabel();
+        // 步进音效由 MakeButton 在 ApplyVolume 之后播放，故可即时试听新音量（0 则自然无声）
+    }
+
     // ---------- 文案 ----------
     private static string RulesText()
     {
@@ -349,10 +498,15 @@ public partial class Title : Control
     public override void _UnhandledInput(InputEvent @event)
     {
         if (@event is not InputEventKey key || !key.Pressed || key.Echo) return;
-        // 弹窗打开时：仅 Esc 关闭，屏蔽其它（避免误触开始游戏）
+        // 任一弹窗打开时：仅 Esc 关闭，屏蔽其它（避免误触开始游戏）
         if (_rulesOverlay != null)
         {
             if (key.Keycode == Key.Escape) CloseRules();
+            return;
+        }
+        if (_settingsOverlay != null)
+        {
+            if (key.Keycode == Key.Escape) CloseSettings();
             return;
         }
         if (key.Keycode == Key.Enter || key.Keycode == Key.KpEnter || key.Keycode == Key.Space)

@@ -87,6 +87,8 @@ public partial class RuleManager : Node
             var s = GD.Load<AudioStream>(kv.Value);
             if (s != null) _sfxStreams[kv.Key] = s;
         }
+        Settings.Load();        // 读取上次保存的分辨率 / 音量
+        Settings.ApplyVolume(); // 让 BGM 从第一帧起就遵循用户音量
         base._EnterTree();
     }
 

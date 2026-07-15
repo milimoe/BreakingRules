@@ -441,6 +441,7 @@ public partial class Player : CharacterBody2D
                     Juice.Instance?.AfterImage(_sprite,
                         _sprite.SpriteFrames.GetFrameTexture(_sprite.Animation, _sprite.Frame),
                         Colors.Red, 4, 0.3f);   // 释放瞬间撕裂残影
+                    Juice.Instance?.SlashOnBoss(boss, new Color(1f, 0.35f, 0.35f), 6, 48f);   // 乱刀斩：BOSS 身上多道斩痕 + 红刀落下
                 }
                 ShowPopup("乱刀斩!", Colors.Gold);
                 break;
@@ -457,6 +458,7 @@ public partial class Player : CharacterBody2D
                     Juice.Instance?.AfterImage(_sprite,
                         _sprite.SpriteFrames.GetFrameTexture(_sprite.Animation, _sprite.Frame),
                         new Color(0.5f, 0.95f, 1f), 4, 0.3f);
+                    Juice.Instance?.SlashOnBoss(boss, new Color(0.5f, 0.95f, 1f), 4, 42f);   // 闪现斩：BOSS 身上斩痕
                 }
                 ShowPopup("闪现斩!", Colors.Gold);
                 break;

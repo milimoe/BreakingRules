@@ -216,7 +216,8 @@ public partial class Juice : Node
     /// tex 取 source 当前帧纹理；tint 决定残影色调。</summary>
     public void AfterImage(Node2D source, Texture2D tex, Color tint, int copies = 3, float life = 0.3f)
     {
-        if (source == null || tex == null) return;
+        if (source == null) return;
+        if (tex == null) tex = Util.Square(40, 40, Colors.White);   // 帧纹理缺失时回退占位方块，杜绝「随机不显示」
         var scene = GetTree()?.CurrentScene;
         if (scene == null) return;
         for (int i = 0; i < copies; i++)
@@ -234,5 +235,49 @@ public partial class Juice : Node
             tw.TweenProperty(sp, "modulate:a", 0f, life);
             tw.TweenCallback(Callable.From(() => sp.QueueFree()));
         }
+    }
+
+    // ------------------------------------------------------------------
+    // 大招斩击特效：在目标（BOSS）身上生成多道斩痕 + 最后一刀红色落下
+    // ------------------------------------------------------------------
+    /// <summary>在 BOSS 身上生成 count 道斩痕（围绕中心随机散布），最后一刀巨大红色落下。
+    /// 进程 Always，故在顿帧冻结期间也能逐刀浮现，强化「乱刀斩 / 闪现斩」的画面感。</summary>
+    public void SlashOnBoss(Boss boss, Color color, int count = 5, float spread = 46f)
+    {
+        if (boss == null || !IsInstanceValid(boss)) return;
+        var scene = GetTree()?.CurrentScene;
+        if (scene == null) return;
+        var rnd = new Random();
+        for (int i = 0; i < count; i++)
+        {
+            float ox = (float)(rnd.NextDouble() * 2 - 1) * spread;
+            float oy = (float)(rnd.NextDouble() * 2 - 1) * spread;
+            float rot = (float)(rnd.NextDouble() * Mathf.Pi);
+            SpawnSlash(scene, boss.GlobalPosition + new Vector2(ox, oy), rot, color, 1f, i * 0.05f);
+        }
+        // 最后一刀：巨大红色斩击（略延迟，收尾落下）
+        SpawnSlash(scene, boss.GlobalPosition, (float)(rnd.NextDouble() * 0.6 - 0.3), Colors.Red, 1.7f, count * 0.05f + 0.06f);
+    }
+
+    private void SpawnSlash(Node scene, Vector2 pos, float rot, Color color, float scale, float delay)
+    {
+        var poly = new Polygon2D();
+        poly.Polygon = new Vector2[]
+        {
+            new Vector2(-55f, -6f), new Vector2(0f, -14f),
+            new Vector2(55f, -6f), new Vector2(0f, 6f)
+        };
+        poly.Color = color;
+        poly.Position = pos;
+        poly.Rotation = rot;
+        poly.Scale = new Vector2(scale * 0.4f, scale * 0.4f);
+        poly.ZIndex = 50;
+        poly.Modulate = new Color(1f, 1f, 1f, 0.95f);
+        scene.AddChild(poly);
+        var tw = CreateTween();
+        if (delay > 0f) tw.TweenInterval(delay);
+        tw.TweenProperty(poly, "scale", new Vector2(scale, scale), 0.10f);
+        tw.TweenProperty(poly, "modulate:a", 0f, 0.20f);
+        tw.TweenCallback(Callable.From(() => poly.QueueFree()));
     }
 }

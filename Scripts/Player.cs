@@ -312,8 +312,8 @@ public partial class Player : CharacterBody2D
         if (Input.IsActionJustPressed("skill3")) TryCast(3, CastSkill3, ref _cd3, Cd3);
         if (Input.IsActionJustPressed("skill4")) TryCast(4, CastSkill4, ref _cd4, Cd4);
 
-        // 大招：F 循环切换选中，长按 E(0.6s) 释放当前选中（能量满时）
-        bool eDown = Input.IsKeyPressed(Key.E);
+        // 大招：ult_switch 循环切换选中，长按 ult_release(0.6s) 释放当前选中（能量满时）
+        bool eDown = Input.IsActionPressed("ult_release");
         if (eDown)
         {
             _eHeld += d;
@@ -325,7 +325,7 @@ public partial class Player : CharacterBody2D
         }
         else { _eHeld = 0f; _ultFired = false; }
 
-        bool fDown = Input.IsKeyPressed(Key.F);
+        bool fDown = Input.IsActionPressed("ult_switch");
         if (fDown && !_fWasDown)
         {
             _selectedUlt = (_selectedUlt + 1) % 3;
@@ -568,7 +568,8 @@ public partial class Player : CharacterBody2D
                Input.IsActionJustPressed("jump") || Input.IsActionJustPressed("attack") ||
                Input.IsActionJustPressed("guard") ||
                Input.IsActionJustPressed("skill1") || Input.IsActionJustPressed("skill2") ||
-               Input.IsActionJustPressed("skill3") || Input.IsActionJustPressed("skill4");
+               Input.IsActionJustPressed("skill3") || Input.IsActionJustPressed("skill4") ||
+               Input.IsActionJustPressed("ult_switch") || Input.IsActionJustPressed("ult_release");
     }
 
     // ---------- 技能系统 ----------

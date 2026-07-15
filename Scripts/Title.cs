@@ -14,6 +14,10 @@ public partial class Title : Control
     private Control _settingsOverlay; // 设置弹窗根，null = 未打开
     private Label _resLabel;         // 设置面板：当前分辨率
     private Label _volLabel;         // 设置面板：当前音量
+    private Godot.Collections.Dictionary<string, Label> _bindLabels = new();  // action -> 当前按键 Label
+    private bool _listening = false;  // 是否处于「听键」状态
+    private string _listeningAction;  // 正在重绑的 action
+    private Button _listeningBtn;     // 正在闪烁的「重新绑定」按钮
 
     public override void _Ready()
     {
@@ -325,6 +329,7 @@ public partial class Title : Control
         dim.MouseFilter = Control.MouseFilterEnum.Stop;
         dim.GuiInput += (ev) =>
         {
+            if (_listening) return;   // 听键中点击遮罩不关闭，避免打断改键
             if (ev is InputEventMouseButton mb && mb.Pressed && mb.ButtonIndex == MouseButton.Left)
                 CloseSettings();
         };
@@ -368,53 +373,89 @@ public partial class Title : Control
         close.Pressed += CloseSettings;
         win.AddChild(close);
 
-        // 分辨率行
-        var resCap = new Label();
-        resCap.Text = "分辨率";
-        resCap.AddThemeFontSizeOverride("font_size", 18);
-        resCap.Modulate = new Color(0.92f, 0.92f, 0.98f);
-        resCap.Position = new Vector2(24f, 96f);
-        resCap.Size = new Vector2(120f, 34f);
-        win.AddChild(resCap);
+        // 滚动内容区：分辨率 / 音量 / 操作按键 全部放入，超出可滚动
+        var body = new ScrollContainer();
+        body.Position = new Vector2(16f, 56f);
+        body.Size = new Vector2(win.Size.X - 32f, win.Size.Y - 72f);
+        body.HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled;
+        body.VerticalScrollMode = ScrollContainer.ScrollMode.Auto;
+        body.AddThemeStyleboxOverride("bg", new StyleBoxFlat());
+        win.AddChild(body);
 
-        win.AddChild(MakeButton("◀", new Vector2(160f, 92f), 46f, 40f, () => CycleResolution(-1)));
+        var col = new VBoxContainer();
+        col.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        col.AddThemeConstantOverride("separation", 10);
+        body.AddChild(col);
+
+        // 分辨率行
+        var resRow = AddRow(col, "分辨率");
+        resRow.AddChild(MakeButton("◀", Vector2.Zero, 46f, 40f, () => CycleResolution(-1)));
         _resLabel = new Label();
         _resLabel.Text = Settings.ResolutionLabel();
         _resLabel.AddThemeFontSizeOverride("font_size", 18);
         _resLabel.HorizontalAlignment = HorizontalAlignment.Center;
         _resLabel.Modulate = new Color(1f, 0.9f, 0.5f);
-        _resLabel.Position = new Vector2(214f, 96f);
-        _resLabel.Size = new Vector2(232f, 34f);
-        win.AddChild(_resLabel);
-        win.AddChild(MakeButton("▶", new Vector2(456f, 92f), 46f, 40f, () => CycleResolution(1)));
+        _resLabel.CustomMinimumSize = new Vector2(232f, 34f);
+        _resLabel.SizeFlagsVertical = Control.SizeFlags.ShrinkCenter;
+        resRow.AddChild(_resLabel);
+        resRow.AddChild(MakeButton("▶", Vector2.Zero, 46f, 40f, () => CycleResolution(1)));
 
         // 主音量行
-        var volCap = new Label();
-        volCap.Text = "主音量";
-        volCap.AddThemeFontSizeOverride("font_size", 18);
-        volCap.Modulate = new Color(0.92f, 0.92f, 0.98f);
-        volCap.Position = new Vector2(24f, 168f);
-        volCap.Size = new Vector2(120f, 34f);
-        win.AddChild(volCap);
-
-        win.AddChild(MakeButton("－", new Vector2(160f, 164f), 46f, 40f, () => StepVolume(-1)));
+        var volRow = AddRow(col, "主音量");
+        volRow.AddChild(MakeButton("－", Vector2.Zero, 46f, 40f, () => StepVolume(-1)));
         _volLabel = new Label();
         _volLabel.Text = Settings.VolumeLabel();
         _volLabel.AddThemeFontSizeOverride("font_size", 18);
         _volLabel.HorizontalAlignment = HorizontalAlignment.Center;
         _volLabel.Modulate = new Color(1f, 0.9f, 0.5f);
-        _volLabel.Position = new Vector2(214f, 168f);
-        _volLabel.Size = new Vector2(232f, 34f);
-        win.AddChild(_volLabel);
-        win.AddChild(MakeButton("＋", new Vector2(456f, 164f), 46f, 40f, () => StepVolume(1)));
+        _volLabel.CustomMinimumSize = new Vector2(232f, 34f);
+        _volLabel.SizeFlagsVertical = Control.SizeFlags.ShrinkCenter;
+        volRow.AddChild(_volLabel);
+        volRow.AddChild(MakeButton("＋", Vector2.Zero, 46f, 40f, () => StepVolume(1)));
+
+        // 分隔标题
+        var sepCap = new Label();
+        sepCap.Text = "操作按键";
+        sepCap.AddThemeFontSizeOverride("font_size", 18);
+        sepCap.Modulate = new Color(1f, 0.85f, 0.4f);
+        col.AddChild(sepCap);
+
+        // 改键行（每行：动作名 + 当前键 + 重新绑定按钮）
+        foreach (var (disp, act) in InputBindings.Rebindable)
+        {
+            var row = new HBoxContainer();
+            row.AddThemeConstantOverride("separation", 8);
+            var name = new Label();
+            name.Text = disp;
+            name.AddThemeFontSizeOverride("font_size", 16);
+            name.Modulate = new Color(0.9f, 0.9f, 0.96f);
+            name.CustomMinimumSize = new Vector2(130f, 36f);
+            name.SizeFlagsVertical = Control.SizeFlags.ShrinkCenter;
+            row.AddChild(name);
+
+            var cur = new Label();
+            cur.Text = InputBindings.KeyLabel(act);
+            cur.AddThemeFontSizeOverride("font_size", 16);
+            cur.HorizontalAlignment = HorizontalAlignment.Center;
+            cur.Modulate = new Color(1f, 0.9f, 0.5f);
+            cur.CustomMinimumSize = new Vector2(140f, 36f);
+            cur.SizeFlagsVertical = Control.SizeFlags.ShrinkCenter;
+            row.AddChild(cur);
+            _bindLabels[act] = cur;
+
+            var btn = MakeButton("重新绑定", Vector2.Zero, 120f, 36f, () => { });
+            btn.Pressed += () => BeginRebind(act, btn);
+            row.AddChild(btn);
+
+            col.AddChild(row);
+        }
 
         var hint = new Label();
-        hint.Text = "分辨率与音量实时生效并自动保存 · 按 Esc 关闭";
-        hint.AddThemeFontSizeOverride("font_size", 14);
+        hint.Text = "分辨率 / 音量 / 按键实时生效并自动保存 · 点「重新绑定」后按任意键 · 按 Esc 关闭";
+        hint.AddThemeFontSizeOverride("font_size", 13);
         hint.Modulate = new Color(0.6f, 0.56f, 0.72f);
-        hint.Position = new Vector2(24f, 408f);
-        hint.Size = new Vector2(652f, 28f);
-        win.AddChild(hint);
+        hint.AutowrapMode = TextServer.AutowrapMode.Word;
+        col.AddChild(hint);
 
         AddChild(overlay);
         _settingsOverlay = overlay;
@@ -432,6 +473,33 @@ public partial class Title : Control
         var tw = CreateTween();
         tw.TweenProperty(ov, "modulate", new Color(1f, 1f, 1f, 0f), 0.15f);
         tw.TweenCallback(Callable.From(() => ov.QueueFree()));
+    }
+
+    // 设置面板里的一行（左侧标题 + 右侧控件由调用方追加）
+    private HBoxContainer AddRow(VBoxContainer col, string caption)
+    {
+        var row = new HBoxContainer();
+        row.AddThemeConstantOverride("separation", 8);
+        var cap = new Label();
+        cap.Text = caption;
+        cap.AddThemeFontSizeOverride("font_size", 18);
+        cap.Modulate = new Color(0.92f, 0.92f, 0.98f);
+        cap.CustomMinimumSize = new Vector2(120f, 40f);
+        cap.SizeFlagsVertical = Control.SizeFlags.ShrinkCenter;
+        row.AddChild(cap);
+        col.AddChild(row);
+        return row;
+    }
+
+    // 进入「听键」状态：按钮变提示，等待下一次按键
+    private void BeginRebind(string action, Button btn)
+    {
+        if (_listening) return;
+        _listening = true;
+        _listeningAction = action;
+        _listeningBtn = btn;
+        btn.Text = "按任意键…";
+        btn.Modulate = new Color(1f, 0.6f, 0.3f);
     }
 
     private void CycleResolution(int dir)
@@ -463,11 +531,11 @@ public partial class Title : Control
             "【玩法】\n" +
             "· 从最底层的「初审官」开始，你将帮助囚徒向上攀爬，挑战每一层的法官（BOSS）。\n" +
             "· BOSS 会不断颁布规则：禁跳 / 禁武 / 限速。规则可能升级为「全图生效」或「跟随你移动」。\n" +
-            "· 走到规则区，长按 Q 划除规则，将其反转成弹簧，并开启真空期（攻击×3、移速×2）。\n" +
+            "· 走到规则区，长按 " + InputBindings.KeyLabel("strike") + " 划除规则，将其反转成弹簧，并开启真空期（攻击×3、移速×2）。\n" +
             "· 击败每一层法官，向上一层发起挑战；打穿最终 BOSS「终裁者」后开启无尽模式。\n\n" +
             "【能量条与大招】\n" +
             "· 能量上限 50：造成伤害、防御成功、消除规则都会积攒能量。\n" +
-            "· 能量充满后，按 F 循环切换三种大招，长按 E（约 0.6 秒）释放。\n" +
+            "· 能量充满后，按 " + InputBindings.KeyLabel("ult_switch") + " 循环切换三种大招，长按 " + InputBindings.KeyLabel("ult_release") + "（约 0.6 秒）释放。\n" +
             "· 乱刀斩（重创）/ 闪现斩（眩晕）/ 时间怀表（持续回血），各自独立冷却（20 / 18 / 25 秒）。\n" +
             "· 能量值与大招选择会继承到下一关。\n\n" +
             "【卡牌系统】\n" +
@@ -480,15 +548,15 @@ public partial class Title : Control
     private static string ControlsText()
     {
         return
-            "移动：A / D（部分规则下左右反转）\n" +
-            "跳跃：W / ↑\n" +
-            "攻击 Boss：J / 空格\n" +
-            "划除条文：长按 Q 约 1 秒（期间按任意键或松手取消，不进入冷却；完成进 5 秒冷却）\n" +
-            "防御（按住 S）：BOSS 攻击前红色描边闪烁预警；防御中完全抵挡 BOSS 伤害，但不可移动/攻击\n" +
-            "技能 1 毁灭直线 / 2 八向射线（各消耗 1 技能点，地图随机掉落宝珠获取）\n" +
-            "技能 3 青色护盾（3 秒无敌，可抵挡投技）/ 4 自我治愈（+2 HP）\n" +
-            "大招：F 切换选中，长按 E 释放（需能量充满；乱刀斩CD20s / 闪现斩CD18s / 时间怀表CD25s）\n" +
-            "规则条文可能全图生效或跟随你（标注【全图】/【跟随】），走到消除区长按 Q 划除。\n" +
+            "移动：" + InputBindings.KeyLabels("move_left") + " / " + InputBindings.KeyLabels("move_right") + "（部分规则下左右反转）\n" +
+            "跳跃：" + InputBindings.KeyLabels("jump") + "\n" +
+            "攻击 Boss：" + InputBindings.KeyLabels("attack") + "\n" +
+            "划除条文：长按 " + InputBindings.KeyLabel("strike") + " 约 1 秒（期间按任意键或松手取消，不进入冷却；完成进 5 秒冷却）\n" +
+            "防御（按住 " + InputBindings.KeyLabel("guard") + "）：BOSS 攻击前红色描边闪烁预警；防御中完全抵挡 BOSS 伤害，但不可移动/攻击\n" +
+            "技能 " + InputBindings.KeyLabel("skill1") + " 毁灭直线 / " + InputBindings.KeyLabel("skill2") + " 八向射线（各消耗 1 技能点，地图随机掉落宝珠获取）\n" +
+            "技能 " + InputBindings.KeyLabel("skill3") + " 青色护盾（3 秒无敌，可抵挡投技）/ " + InputBindings.KeyLabel("skill4") + " 自我治愈（+2 HP）\n" +
+            "大招：" + InputBindings.KeyLabel("ult_switch") + " 切换选中，长按 " + InputBindings.KeyLabel("ult_release") + " 释放（需能量充满；乱刀斩CD20s / 闪现斩CD18s / 时间怀表CD25s）\n" +
+            "规则条文可能全图生效或跟随你（标注【全图】/【跟随】），走到消除区长按 " + InputBindings.KeyLabel("strike") + " 划除。\n" +
             "本游戏的操作说明也是规则，但你不需要遵守它们。";
     }
 
@@ -503,21 +571,40 @@ public partial class Title : Control
 
     public override void _UnhandledInput(InputEvent @event)
     {
-        if (@event is not InputEventKey key || !key.Pressed || key.Echo) return;
+        // 听键中：捕获下一个按键，重绑并持久化，消费事件避免误触暂停/关闭
+        if (_listening && @event is InputEventKey key && key.Pressed && !key.Echo)
+        {
+            int code = (int)key.PhysicalKeycode;
+            InputBindings.ApplyAction(_listeningAction, code);
+            InputBindings.SaveBinding(_listeningAction, code);
+            if (_bindLabels.TryGetValue(_listeningAction, out var lbl))
+                lbl.Text = InputBindings.KeyLabel(_listeningAction);
+            if (_listeningBtn != null)
+            {
+                _listeningBtn.Text = "重新绑定";
+                _listeningBtn.Modulate = Colors.White;
+            }
+            _listening = false;
+            _listeningAction = null;
+            _listeningBtn = null;
+            GetViewport().SetInputAsHandled();
+            return;
+        }
+        if (@event is not InputEventKey key2 || !key2.Pressed || key2.Echo) return;
         // 任一弹窗打开时：仅 Esc 关闭，屏蔽其它（避免误触开始游戏）
         if (_rulesOverlay != null)
         {
-            if (key.Keycode == Key.Escape) CloseRules();
+            if (key2.Keycode == Key.Escape) CloseRules();
             return;
         }
         if (_settingsOverlay != null)
         {
-            if (key.Keycode == Key.Escape) CloseSettings();
+            if (key2.Keycode == Key.Escape) CloseSettings();
             return;
         }
-        if (key.Keycode == Key.Enter || key.Keycode == Key.KpEnter || key.Keycode == Key.Space)
+        if (key2.Keycode == Key.Enter || key2.Keycode == Key.KpEnter || key2.Keycode == Key.Space)
             StartGame();
-        else if (key.Keycode == Key.Escape)
+        else if (key2.Keycode == Key.Escape)
             QuitGame();
     }
 }

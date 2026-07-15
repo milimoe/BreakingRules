@@ -25,7 +25,29 @@ public partial class Controls : Panel
         _toggle = GetNode<Button>("VBox/Header/Toggle");
         _toggle.Connect(Button.SignalName.Pressed, Callable.From(OnToggle));
         _expanded = _savedExpanded;   // 重载场景后读取上次状态
+        SyncKeyLabels();              // 用实际按键覆盖 .tscn 里的写死文本
         Apply();
+    }
+
+    // 把各操作明细行的按键替换为当前实际绑定（改键后即时反映，无需重开场景）
+    private void SyncKeyLabels()
+    {
+        if (_content == null) return;
+        SetLine("Move",   "移动：" + InputBindings.KeyLabels("move_left") + " / " + InputBindings.KeyLabels("move_right"));
+        SetLine("Jump",   "跳跃：" + InputBindings.KeyLabels("jump"));
+        SetLine("Attack", "攻击 Boss：" + InputBindings.KeyLabels("attack"));
+        SetLine("Strike", "划除条文（长按 " + InputBindings.KeyLabel("strike") + " 约1秒，任意键取消；5秒冷却）");
+        SetLine("Guard",  "防御（按住 " + InputBindings.KeyLabel("guard") + "，完全抵挡 BOSS 伤害；防御中不可移动/攻击）");
+        SetLine("Skill",  "技能：" + InputBindings.KeyLabel("skill1") + " 毁灭直线 / " + InputBindings.KeyLabel("skill2") + " 八向射线");
+        SetLine("Skill3", "护盾：" + InputBindings.KeyLabel("skill3") + " 青色护盾（3秒无敌，可挡投技）");
+        SetLine("Skill4", "治愈：" + InputBindings.KeyLabel("skill4") + " 自我治愈（+2 HP）");
+        SetLine("Ult",    "大招：" + InputBindings.KeyLabel("ult_switch") + " 切换 · 长按 " + InputBindings.KeyLabel("ult_release") + " 释放（需能量充满）");
+    }
+
+    private void SetLine(string nodeName, string text)
+    {
+        var l = _content.GetNodeOrNull<Label>(nodeName);
+        if (l != null) l.Text = text;
     }
 
     // 点击切换：翻转子节后必须 Apply()，否则只改了布尔、面板与按钮文本纹丝不动（按钮「点了没反应」的根因）。

@@ -153,14 +153,14 @@ public partial class Hud : Control
         _skillLabel.Modulate = new Color(1f, 0.9f, 0.4f); // 金：技能点
         AddChild(_skillLabel);
 
-        // 槽定义：按键、图标种类、强调色（Q 青 / 1 橙红 / 2 蓝 / 3 青护盾 / 4 绿治愈）
-        var slots = new (string key, int icon, Color accent)[]
+        // 槽定义：action 名（用于读取实际按键）、图标种类、强调色（划除青 / 1 橙红 / 2 蓝 / 3 青护盾 / 4 绿治愈）
+        var slots = new (string action, int icon, Color accent)[]
         {
-            ("Q", 3, new Color(0.40f, 0.95f, 0.90f)),
-            ("1", 1, new Color(1.00f, 0.45f, 0.35f)),
-            ("2", 2, new Color(0.50f, 0.90f, 1.00f)),
-            ("3", 4, new Color(0.30f, 1.00f, 0.95f)),
-            ("4", 5, new Color(0.45f, 1.00f, 0.55f)),
+            ("strike", 3, new Color(0.40f, 0.95f, 0.90f)),
+            ("skill1", 1, new Color(1.00f, 0.45f, 0.35f)),
+            ("skill2", 2, new Color(0.50f, 0.90f, 1.00f)),
+            ("skill3", 4, new Color(0.30f, 1.00f, 0.95f)),
+            ("skill4", 5, new Color(0.45f, 1.00f, 0.55f)),
         };
         for (int i = 0; i < slots.Length; i++)
         {
@@ -187,7 +187,7 @@ public partial class Hud : Control
             slot.AddChild(icon);
 
             var key = new Label();
-            key.Text = def.key;
+            key.Text = InputBindings.KeyLabel(def.action);
             key.AddThemeFontSizeOverride("font_size", 13);
             key.Position = new Vector2(2f, 30f);
             key.Modulate = def.accent;
@@ -259,15 +259,15 @@ public partial class Hud : Control
             _ultIcons[i] = icon;
 
             var key = new Label();
-            key.Text = "F";
+            key.Text = InputBindings.KeyLabel("ult_switch");
             key.AddThemeFontSizeOverride("font_size", 12);
             key.Position = new Vector2(2f, 30f);
             key.Modulate = Colors.Gold;
             frame.AddChild(key);
 
-            // 长按 E 释放提示（与「F 切换选中」并列，避免玩家不知道按什么释放）
+            // 长按 ult_release 释放提示（与「ult_switch 切换选中」并列，避免玩家不知道按什么释放）
             var keyE = new Label();
-            keyE.Text = "E";
+            keyE.Text = InputBindings.KeyLabel("ult_release");
             keyE.AddThemeFontSizeOverride("font_size", 12);
             keyE.HorizontalAlignment = HorizontalAlignment.Right;
             keyE.Position = new Vector2(0f, 30f);

@@ -19,7 +19,11 @@ public partial class LevelDirector : Node2D
     private bool _cardPicking;          // 卡牌选择浮层是否打开（打开时屏蔽 ESC 等输入）
     private CanvasLayer _cardLayer;
     private Label _cardTitle;
+    private ScrollContainer _cardScroll;   // 卡片列表可滚动容器（换卡 5 张时出滚动条）
     private VBoxContainer _cardBody;
+    private HBoxContainer _cardActions;     // 底部操作区：跳过 / 确认 / 取消
+    private string _swapNewId;              // 换卡待加入的新卡
+    private string _selectedOldId;          // 换卡当前选中的旧卡（null=未选）
     private CanvasLayer _cardViewLayer; // ESC 暂停内的「查看卡牌」窗口（列出已选卡，特赦令已用则灰）
     private bool _cardViewOpen;
 
@@ -523,17 +527,34 @@ public partial class LevelDirector : Node2D
         _cardTitle.Modulate = new Color(1f, 0.9f, 0.5f);
         panel.AddChild(_cardTitle);
 
+        // 可滚动卡片区：高度受限，卡片过多（换卡 5 张）时自动出现纵向滚动条
+        _cardScroll = new ScrollContainer();
+        _cardScroll.Position = new Vector2(40f, 56f);
+        _cardScroll.Size = new Vector2(640f, 250f);
+        _cardScroll.HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled;
+        _cardScroll.VerticalScrollMode = ScrollContainer.ScrollMode.Auto;
+        panel.AddChild(_cardScroll);
+
         _cardBody = new VBoxContainer();
-        _cardBody.Position = new Vector2(40f, 60f);
-        _cardBody.Size = new Vector2(640f, 320f);
+        _cardBody.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        _cardBody.SizeFlagsVertical = Control.SizeFlags.ShrinkBegin;
         _cardBody.AddThemeConstantOverride("separation", 12);
-        panel.AddChild(_cardBody);
+        _cardScroll.AddChild(_cardBody);
+
+        // 底部操作区（跳过 / 确认 / 取消），居中排布
+        _cardActions = new HBoxContainer();
+        _cardActions.Position = new Vector2(40f, 318f);
+        _cardActions.Size = new Vector2(640f, 64f);
+        _cardActions.AddThemeConstantOverride("separation", 24);
+        _cardActions.Alignment = BoxContainer.AlignmentMode.Center;
+        panel.AddChild(_cardActions);
     }
 
     private void ShowThreeChoices()
     {
         _cardTitle.Text = $"选择一张卡牌（第{RunState.Instance.CurrentStage + 1}关）";
-        foreach (Node c in _cardBody.GetChildren()) c.QueueFree();
+        ClearCardBody();
+        ClearActions();
         var pool = new System.Collections.Generic.List<string>();
         foreach (var card in CardDefs.All)
             if (!RunState.Instance.OwnedCards.Contains(card.id)) pool.Add(card.id);
@@ -543,22 +564,78 @@ public partial class LevelDirector : Node2D
             var card = CardDefs.Get(id).Value;
             _cardBody.AddChild(MakeCardButton(card.name, card.desc, card.color, () => OnPickCard(id)));
         }
+        // 选满 5 张后再次开选卡界面时，提供【跳过】按钮（保留当前 5 张，不抽第 6 张）
+        if (RunState.Instance.OwnedCards.Count >= RunState.MaxCards)
+            AddActionButton("跳过（保留当前 5 张）", () => CloseCardPicker(), false);
     }
 
-    // 满 5 张时选第 6 张：进入替换步骤（换掉的卡回卡池）
+    // 满 5 张时选第 6 张：进入替换步骤（先点选旧卡，再按【确认】才生效；【取消】=保留当前 5 张）
     private void ShowSwapStep(string newId)
     {
-        var card = CardDefs.Get(newId).Value;
-        _cardTitle.Text = $"已满 5 张：选择一张替换（{card.name} 将加入）";
-        foreach (Node c in _cardBody.GetChildren()) c.QueueFree();
+        _swapNewId = newId;
+        _selectedOldId = null;
+        RenderSwap();
+    }
+
+    private void RenderSwap()
+    {
+        var card = CardDefs.Get(_swapNewId).Value;
+        _cardTitle.Text = $"已满 5 张：选择一张替换（{card.name} 将加入，点选后按【确认】）";
+        ClearCardBody();
         foreach (var oldId in RunState.Instance.OwnedCards)
         {
             var oc = CardDefs.Get(oldId).Value;
-            _cardBody.AddChild(MakeCardButton(oc.name, oc.desc, oc.color, () => OnSwapOut(newId, oldId)));
+            bool sel = oldId == _selectedOldId;
+            _cardBody.AddChild(MakeCardButton(oc.name, oc.desc, oc.color,
+                () => { _selectedOldId = oldId; RenderSwap(); }, sel));
         }
+        ClearActions();
+        AddActionButton("确认替换", () => OnConfirmSwap(), true);
+        AddActionButton("取消", () => CloseCardPicker(), false);
     }
 
-    private Button MakeCardButton(string name, string desc, Color color, System.Action act)
+    private void OnConfirmSwap()
+    {
+        if (RunState.Instance == null || _selectedOldId == null) return;  // 未选旧卡则无效
+        RunState.Instance.RemoveCard(_selectedOldId);   // 换掉的卡回到卡池（下次抽取可能出现）
+        RunState.Instance.AddCard(_swapNewId);
+        CloseCardPicker();
+    }
+
+    private void ClearCardBody()
+    {
+        foreach (Node c in _cardBody.GetChildren()) c.QueueFree();
+    }
+
+    private void ClearActions()
+    {
+        foreach (Node c in _cardActions.GetChildren()) c.QueueFree();
+    }
+
+    private void AddActionButton(string label, System.Action act, bool emphasize)
+    {
+        var btn = new Button();
+        btn.Text = label;
+        btn.CustomMinimumSize = new Vector2(220f, 48f);
+        btn.AddThemeFontSizeOverride("font_size", 18);
+        btn.Alignment = HorizontalAlignment.Center;
+        btn.ProcessMode = Node.ProcessModeEnum.Always;
+        btn.FocusMode = Control.FocusModeEnum.None;   // 键盘不抢焦点
+        if (emphasize)
+        {
+            var ps = new StyleBoxFlat();
+            ps.BgColor = new Color(0.30f, 0.20f, 0.10f, 0.95f);
+            ps.BorderColor = Colors.Gold;
+            ps.BorderWidthLeft = ps.BorderWidthTop = ps.BorderWidthRight = ps.BorderWidthBottom = 3;
+            btn.AddThemeStyleboxOverride("normal", ps);
+            btn.AddThemeColorOverride("font_color", Colors.Gold);
+        }
+        btn.Pressed += () => act();
+        WireButtonSfx(btn);
+        _cardActions.AddChild(btn);
+    }
+
+    private Button MakeCardButton(string name, string desc, Color color, System.Action act, bool selected = false)
     {
         var btn = new Button();
         btn.Text = "";
@@ -567,6 +644,17 @@ public partial class LevelDirector : Node2D
         btn.Alignment = HorizontalAlignment.Center;
         btn.ProcessMode = Node.ProcessModeEnum.Always;
         btn.FocusMode = Control.FocusModeEnum.None;   // 键盘不抢焦点
+        if (selected)
+        {
+            // 选中态高亮：金色边框 + 暖色底，直观区分已选卡片
+            var ps = new StyleBoxFlat();
+            ps.BgColor = new Color(0.25f, 0.18f, 0.05f, 0.6f);
+            ps.BorderColor = Colors.Gold;
+            ps.BorderWidthLeft = ps.BorderWidthTop = ps.BorderWidthRight = ps.BorderWidthBottom = 4;
+            btn.AddThemeStyleboxOverride("normal", ps);
+            btn.AddThemeStyleboxOverride("hover", ps);
+            btn.AddThemeStyleboxOverride("pressed", ps);
+        }
         var vb = new VBoxContainer();
         vb.AddThemeConstantOverride("separation", 4);
         var n = new Label();
@@ -596,13 +684,6 @@ public partial class LevelDirector : Node2D
         {
             ShowSwapStep(id);   // 已满 5 张 → 进入替换步骤
         }
-    }
-
-    private void OnSwapOut(string newId, string oldId)
-    {
-        RunState.Instance.RemoveCard(oldId);   // 换掉的卡回到卡池（下次抽取可能出现）
-        RunState.Instance.AddCard(newId);
-        CloseCardPicker();
     }
 
     private void CloseCardPicker()

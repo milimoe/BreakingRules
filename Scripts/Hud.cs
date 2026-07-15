@@ -16,6 +16,7 @@ public partial class Hud : Control
     private Label _vacuum;
     private Label _skillLabel;
     private TextureRect[] _skillIcons = new TextureRect[5];
+    private Label _timerLabel;   // 左下角全程计时
     private Label[] _skillCdLabels = new Label[5];
 
     // 能量条 / 大招
@@ -84,6 +85,13 @@ public partial class Hud : Control
         AddChild(_vacuum);
 
         BuildEnergyUi();
+
+        // 全程计时：左下角（视口高 540，y=510 留出约 30px）
+        _timerLabel = new Label();
+        _timerLabel.Position = new Vector2(12f, 510f);
+        _timerLabel.AddThemeFontSizeOverride("font_size", 16);
+        _timerLabel.Modulate = new Color(0.82f, 0.82f, 0.92f);
+        AddChild(_timerLabel);
 
         if (_player != null)
             _player.Connect(Player.SignalName.HealthChanged, Callable.From<int, int>(OnHealth));
@@ -399,6 +407,14 @@ public partial class Hud : Control
 
     public override void _Process(double delta)
     {
+        // 全程计时：本节点 ProcessMode=Inherit，场景暂停（过场/ESC/选卡换卡）时 _Process 不跑，
+        // 计时自然停表；仅真正游玩时累加。RunTime 存于 RunState（Autoload，跨关保留）。
+        if (RunState.Instance != null)
+        {
+            RunState.Instance.RunTime += delta;
+            _timerLabel.Text = FormatTime(RunState.Instance.RunTime);
+        }
+
         if (_boss == null || !IsInstanceValid(_boss)) FindBoss();
         if (RuleManager.Instance != null && RuleManager.Instance.IsVacuum)
             _vacuum.Text = $"真空期 {RuleManager.Instance.VacuumRemaining:F1}s · 攻击×3 移速×2";
@@ -437,5 +453,14 @@ public partial class Hud : Control
         int hp = _player != null ? _player.Hp : 0;
         string hearts = hp > 0 ? new string('♥', hp) : "—";
         _status.Text = $"生命 {hearts}";
+    }
+
+    private static string FormatTime(double t)
+    {
+        int total = (int)Mathf.Floor(t);
+        int h = total / 3600;
+        int m = (total % 3600) / 60;
+        int s = total % 60;
+        return h > 0 ? $"{h:D2}:{m:D2}:{s:D2}" : $"{m:D2}:{s:D2}";
     }
 }

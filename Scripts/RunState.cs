@@ -29,6 +29,10 @@ public partial class RunState : Node
     public float CarryEnergy { get; set; }
     public int CarryUlt { get; set; }
 
+    // 全程计时（秒）：从第一关开始累计；过场界面 / ESC 暂停 / 选卡换卡时因场景暂停，
+    // HUD 的 _Process（ProcessMode=Inherit）在 Paused 下不再推进，自然停表。
+    public double RunTime { get; set; }
+
     // 卡牌系统：一局之内（跨关）保留已获得的卡牌；新开局 / 重新开始清零。
     // 第 3 关起每关开局 3 选 1，最多持有 5 张；选第 6 张时须替换一张（换掉的回卡池）。
     public const int MaxCards = 5;
@@ -71,6 +75,7 @@ public partial class RunState : Node
         CurrentStage = 0;
         Carry = false;   // 新开局：不继承（满血、0 技能点）
         ClearCards();    // 新开局：清空已获得卡牌
+        RunTime = 0;     // 新开局：全程计时归零（从第一关重新计）
     }
 
     /// <summary>击败一个 BOSS：通关数 +1；若刷新纪录则立即落盘。</summary>

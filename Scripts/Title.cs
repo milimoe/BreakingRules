@@ -126,7 +126,7 @@ public partial class Title : Control
         int cols = 2;
         float gridW = cols * bw + (cols - 1) * colGap;   // 2*220 + 24 = 464
         float startX = (960f - gridW) / 2f;
-        float startY = 344f;
+        float startY = 354f;
         for (int i = 0; i < labels.Length; i++)
         {
             int idx = i;

@@ -27,6 +27,19 @@ public partial class LevelDirector : Node2D
     private CanvasLayer _cardViewLayer; // ESC 暂停内的「查看卡牌」窗口（列出已选卡，特赦令已用则灰）
     private bool _cardViewOpen;
 
+    // ---------- 过场对话（AVG 风格） ----------
+    private CanvasLayer _dlgLayer;          // 对话浮层，null = 未激活
+    private Label _dlgSpeaker;              // 说话者名
+    private Label _dlgText;                 // 正文（打字机）
+    private bool _dlgActive;                // 对话进行中（拦截输入 / 驱动打字机）
+    private System.Collections.Generic.List<(string speaker, string text)> _dlgLines;
+    private int _dlgIndex;
+    private System.Action _dlgOnDone;       // 对话正常结束（最后一行后）的回调
+    private bool _dlgTyping;                // 当前行是否正在打字
+    private string _dlgFull;                // 当前行完整文本
+    private int _dlgShown;                  // 已显示字符数
+    private const float DlgCps = 46f;      // 打字机速度（字符/秒）
+
     public override void _Ready()
     {
         // 暂停游戏时仍需接收 R / Enter 等按键与对话框按钮，故本节点设为 Always。
@@ -50,9 +63,8 @@ public partial class LevelDirector : Node2D
         // 注意：BGM 由 RuleManager 在游戏启动即全局循环播放（跨场景续播、暂停也不断），
         // 此处不再单独启停。
 
-        // 第 3 关起（CurrentStage>=2）开局暂停弹「3 选 1」卡牌浮层
-        if (RunState.Instance != null && RunState.Instance.CurrentStage >= 2)
-            CallDeferred(nameof(ShowCardPicker));
+        // 关卡开场：第 1/2/3 关先放前置过场对话，结束后再按需弹出卡牌浮层并开战。
+        CallDeferred(nameof(StartLevelIntro));
     }
 
     private void BuildTerrain()
@@ -91,6 +103,8 @@ public partial class LevelDirector : Node2D
     {
         if (_ended) return;
         _ended = true;   // 先锁，避免演出期间 ESC / 重入触发暂停
+        // 慢动作演出期间玩家仍可控：临时无敌，避免此时违规（撞入规则区）掉血造成混乱。
+        _player?.SetDeathInvuln(true);
         // 死亡演出：放慢游戏速度 + 镜头拉近 BOSS，结束后再弹结算（不直接暂停）。
         // 用 Engine.TimeScale 做慢动作（非 Paused），故 Tween / 浮字 / 镜头都随之慢放，更有戏剧感。
         Engine.TimeScale = 0.35f;
@@ -99,7 +113,19 @@ public partial class LevelDirector : Node2D
         Juice.Instance?.BossDeathCinematic(bossPos, () =>
         {
             Engine.TimeScale = 1.0f;   // 还原时间缩放（须在 Paused 前）
-            Win();
+            _player?.SetDeathInvuln(false);  // 演出结束：解除临时无敌（随后 Win 会暂停全场）
+            int stage = RunState.Instance != null ? RunState.Instance.CurrentStage : 0;
+            // 第 5 关（CurrentStage==4）击败终裁者：先放结局升华对话（暂停 BGM），再弹结算窗。
+            if (stage == 4)
+            {
+                var lines = GetPostDialogue();
+                if (lines != null) ShowDialogue(lines, Win);
+                else Win();
+            }
+            else
+            {
+                Win();
+            }
         });
     }
 
@@ -469,6 +495,16 @@ public partial class LevelDirector : Node2D
 
     public override void _UnhandledInput(InputEvent @event)
     {
+        // 过场对话进行中：空格/回车 继续一行，Esc 直接跳过整段对话。
+        if (_dlgActive)
+        {
+            if (@event is InputEventKey k && k.Pressed && !k.Echo)
+            {
+                if (k.Keycode == Key.Escape) SkipDialogue();
+                else if (k.Keycode == Key.Space || k.Keycode == Key.Enter || k.Keycode == Key.KpEnter) AdvanceDialogue();
+            }
+            return;
+        }
         if (_cardPicking) return;   // 卡牌选择期间屏蔽一切按键（ESC/胜负快捷键）
         if (@event is InputEventKey key && key.Pressed && !key.Echo)
         {
@@ -703,5 +739,234 @@ public partial class LevelDirector : Node2D
         GetTree().Paused = false;
         _cardLayer?.QueueFree();
         _cardLayer = null;
+    }
+
+    // ---------- 过场对话（AVG 风格） ----------
+    /// <summary>关卡开场引导：第 1/2/3 关先放前置对话，结束后再按需弹卡牌浮层并开战。</summary>
+    private void StartLevelIntro()
+    {
+        int stage = RunState.Instance != null ? RunState.Instance.CurrentStage : 0;
+        var lines = GetPreDialogue(stage);
+        if (lines != null) ShowDialogue(lines, AfterPreDialogue);
+        else AfterPreDialogue();
+    }
+
+    private void AfterPreDialogue()
+    {
+        int stage = RunState.Instance != null ? RunState.Instance.CurrentStage : 0;
+        if (stage >= 2) ShowCardPicker();   // 第 3 关起每关开局选卡
+    }
+
+    /// <summary>第 1/2/3 关开战前的前置对话（背景 / 提醒 / 卡牌系统觉醒）；其余关返回 null。</summary>
+    private System.Collections.Generic.List<(string, string)> GetPreDialogue(int stage)
+    {
+        if (stage == 0)  // 第 1 关：背景介绍 + 主角目标
+            return new System.Collections.Generic.List<(string, string)>
+            {
+                ("旁白",  "「规则之塔」——一座由层层法条堆砌的牢笼。你被囚禁在最底层，无人记得你的罪名。"),
+                ("囚徒",  "他们说，规则就是秩序。可我的审判，从头到尾都不曾公正。"),
+                ("旁白",  "塔有九十九层，每层都有一位法官把守。初审官，是其中最微不足道的一个。"),
+                ("囚徒",  "但再微不足道，也是一道门。打破它，我便能向上。"),
+                ("旁白",  "……那么，开始你的第一次打破吧。"),
+            };
+        if (stage == 1)  // 第 2 关：BOSS 增强 + 规则可能遍布全图
+            return new System.Collections.Generic.List<(string, string)>
+            {
+                ("旁白",  "第二层。守门的法官，似乎比初审官更熟悉「力量」的意味。"),
+                ("囚徒",  "他的条文……比之前更密了。"),
+                ("旁白",  "警告：此后颁布的规则可能遍布全场（标注【全图】），甚至尾随你移动（标注【跟随】）。"),
+                ("囚徒",  "无孔不入么。那我就划得更快。"),
+                ("旁白",  "小心——真空期短暂，别在规则的缝隙间犹豫。"),
+            };
+        if (stage == 2)  // 第 3 关：外部力量（卡牌系统）觉醒
+            return new System.Collections.Generic.List<(string, string)>
+            {
+                ("旁白",  "第三层。某种「外力」开始渗入这座塔。"),
+                ("？？？", "囚徒。你听见了吗？是规则在尖叫。"),
+                ("？？？", "我们是被塔吞没的「前例」，如今化作了卡牌。拿走我们，你便能改写审判。"),
+                ("囚徒",  "卡牌……可我凭什么相信，你们不是另一种牢笼？"),
+                ("？？？", "信不信由你。但每破一层，便有一张落入你手中。"),
+                ("旁白",  "（此后每通过一关，可从三张卡中择一；满五张则需替换。流派，由你定义。）"),
+            };
+        return null;
+    }
+
+    /// <summary>第 5 关（CurrentStage==4）击败终裁者后的结局升华对话（含无尽模式介绍）。</summary>
+    private System.Collections.Generic.List<(string, string)> GetPostDialogue()
+    {
+        return new System.Collections.Generic.List<(string, string)>
+        {
+            ("旁白",  "终裁者的身影崩解成无数碎片，规则的回响终于沉寂。"),
+            ("囚徒",  "原来站在最高处的，也不过是个写规则的人。"),
+            ("？？？", "你打破了终审。可塔外，还有无数座塔。"),
+            ("？？？", "从今往后，没有新的法官——只有无穷的层，与无穷的你。"),
+            ("旁白",  "【无尽模式开启】层数不再有尽头，难度持续攀升。规则，由你继续打破。"),
+            ("囚徒",  "……那就，继续向上吧。"),
+        };
+    }
+
+    // ---------- 对话 UI 与流程 ----------
+    /// <summary>显示一段 AVG 对话：冻结全场 + 暂停 BGM，逐字打字机，点击 / 空格继续，Esc /【跳过】一键跳过。
+    /// 全部行播完后调用 onDone（如开战前的卡牌浮层、或击败后的结算窗）。</summary>
+    private void ShowDialogue(System.Collections.Generic.List<(string, string)> lines, System.Action onDone)
+    {
+        if (_dlgActive || lines == null || lines.Count == 0) { onDone?.Invoke(); return; }
+        _dlgActive = true;
+        _dlgLines = lines;
+        _dlgIndex = 0;
+        _dlgOnDone = onDone;
+
+        _dlgLayer = new CanvasLayer();
+        _dlgLayer.Layer = 40;   // 高于卡牌浮层(30)与胜负对话框(20)
+        _dlgLayer.ProcessMode = Node.ProcessModeEnum.Always;  // 暂停时浮层可交互
+        AddChild(_dlgLayer);
+
+        // 遮罩：吞点击，并作为「点击任意处继续」的捕获层（MouseFilter=Stop）
+        var dim = new ColorRect();
+        dim.Color = new Color(0f, 0f, 0f, 0.55f);
+        dim.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+        dim.MouseFilter = Control.MouseFilterEnum.Stop;
+        dim.GuiInput += (ev) =>
+        {
+            if (ev is InputEventMouseButton mb && mb.Pressed && mb.ButtonIndex == MouseButton.Left)
+                AdvanceDialogue();
+        };
+        _dlgLayer.AddChild(dim);
+
+        // 对话面板（底部 AVG 风格）。MouseFilter=Ignore，让非按钮点击穿透到 dim 触发继续。
+        var panel = new Panel();
+        panel.Position = new Vector2(90f, 350f);
+        panel.Size = new Vector2(780f, 178f);
+        var ps = new StyleBoxFlat();
+        ps.BgColor = new Color(0.06f, 0.05f, 0.13f, 0.98f);
+        ps.BorderColor = new Color(0.85f, 0.7f, 0.4f, 1f);
+        ps.BorderWidthLeft = ps.BorderWidthTop = ps.BorderWidthRight = ps.BorderWidthBottom = 3;
+        ps.CornerRadiusTopLeft = ps.CornerRadiusTopRight =
+            ps.CornerRadiusBottomLeft = ps.CornerRadiusBottomRight = 12;
+        ps.ContentMarginLeft = ps.ContentMarginRight = 18;
+        ps.ContentMarginTop = ps.ContentMarginBottom = 14;
+        panel.AddThemeStyleboxOverride("panel", ps);
+        panel.MouseFilter = Control.MouseFilterEnum.Ignore;
+        _dlgLayer.AddChild(panel);
+
+        _dlgSpeaker = new Label();
+        _dlgSpeaker.Position = new Vector2(24f, 16f);
+        _dlgSpeaker.Size = new Vector2(420f, 30f);
+        _dlgSpeaker.AddThemeFontSizeOverride("font_size", 20);
+        _dlgSpeaker.HorizontalAlignment = HorizontalAlignment.Left;
+        _dlgSpeaker.Modulate = new Color(1f, 0.85f, 0.4f);
+        _dlgSpeaker.MouseFilter = Control.MouseFilterEnum.Ignore;
+        panel.AddChild(_dlgSpeaker);
+
+        _dlgText = new Label();
+        _dlgText.Position = new Vector2(24f, 54f);
+        _dlgText.Size = new Vector2(732f, 96f);
+        _dlgText.AddThemeFontSizeOverride("font_size", 17);
+        _dlgText.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+        _dlgText.VerticalAlignment = VerticalAlignment.Top;
+        _dlgText.Modulate = new Color(0.94f, 0.94f, 0.98f);
+        _dlgText.MouseFilter = Control.MouseFilterEnum.Ignore;
+        panel.AddChild(_dlgText);
+
+        var hint = new Label();
+        hint.Text = "空格 / 点击 继续 · Esc 跳过";
+        hint.Position = new Vector2(508f, 148f);
+        hint.Size = new Vector2(248f, 20f);
+        hint.AddThemeFontSizeOverride("font_size", 13);
+        hint.HorizontalAlignment = HorizontalAlignment.Right;
+        hint.Modulate = new Color(0.6f, 0.56f, 0.72f);
+        hint.MouseFilter = Control.MouseFilterEnum.Ignore;
+        panel.AddChild(hint);
+
+        // 【跳过】按钮：一键跳过整段对话（MouseFilter=Stop，点击不触发 dim 的继续）
+        var skip = new Button();
+        skip.Text = "跳过 ▶▶";
+        skip.Position = new Vector2(panel.Size.X - 116f, 14f);
+        skip.Size = new Vector2(100f, 34f);
+        skip.AddThemeFontSizeOverride("font_size", 16);
+        skip.Alignment = HorizontalAlignment.Center;
+        skip.ProcessMode = Node.ProcessModeEnum.Always;
+        skip.FocusMode = Control.FocusModeEnum.None;
+        skip.AddThemeStyleboxOverride("normal", new StyleBoxFlat
+        {
+            BgColor = new Color(0.30f, 0.18f, 0.12f, 0.95f),
+            BorderColor = new Color(0.95f, 0.7f, 0.5f, 1f),
+            BorderWidthLeft = 2,
+            BorderWidthTop = 2,
+            BorderWidthRight = 2,
+            BorderWidthBottom = 2,
+        });
+        skip.AddThemeColorOverride("font_color", new Color(1f, 0.9f, 0.8f));
+        skip.Pressed += SkipDialogue;
+        WireButtonSfx(skip);
+        panel.AddChild(skip);
+
+        RuleManager.Instance?.PauseBGM();
+        GetTree().Paused = true;   // 冻结游戏（玩家/BOSS 不动）；对话结束后由 onDone 恢复/进入下一步
+        ShowLine(0);
+    }
+
+    private void ShowLine(int i)
+    {
+        if (_dlgLines == null || i < 0 || i >= _dlgLines.Count) return;
+        var (sp, tx) = _dlgLines[i];
+        _dlgSpeaker.Text = sp;
+        _dlgFull = tx;
+        _dlgShown = 0;
+        _dlgTyping = true;
+        _dlgText.Text = "";
+    }
+
+    /// <summary>推进对话：打字中则瞬间补全本行；否则进入下一行；末行后结束。</summary>
+    private void AdvanceDialogue()
+    {
+        if (!_dlgActive) return;
+        if (_dlgTyping)
+        {
+            _dlgShown = _dlgFull.Length;
+            _dlgText.Text = _dlgFull;
+            _dlgTyping = false;
+            return;
+        }
+        _dlgIndex++;
+        if (_dlgIndex >= _dlgLines.Count) EndDialogue();
+        else ShowLine(_dlgIndex);
+    }
+
+    /// <summary>结束对话（正常播完或中途跳过）：恢复 BGM 与树，清理浮层，触发 onDone。</summary>
+    private void EndDialogue()
+    {
+        if (!_dlgActive) return;
+        _dlgActive = false;
+        RuleManager.Instance?.ResumeBGM();
+        GetTree().Paused = false;
+        var layer = _dlgLayer;
+        _dlgLayer = null;
+        layer?.QueueFree();
+        var done = _dlgOnDone;
+        _dlgOnDone = null;
+        done?.Invoke();
+    }
+
+    /// <summary>一键跳过：直接结束整段对话。</summary>
+    private void SkipDialogue() => EndDialogue();
+
+    public override void _Process(double delta)
+    {
+        // 对话打字机：本节点 Always，暂停期间仍推进，逐字显示当前行。
+        if (_dlgActive && _dlgTyping)
+        {
+            _dlgShown += (int)(DlgCps * (float)delta);
+            if (_dlgShown >= _dlgFull.Length)
+            {
+                _dlgShown = _dlgFull.Length;
+                _dlgTyping = false;
+                _dlgText.Text = _dlgFull;
+            }
+            else
+            {
+                _dlgText.Text = _dlgFull.Substring(0, _dlgShown);
+            }
+        }
     }
 }

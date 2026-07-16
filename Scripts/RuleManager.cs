@@ -218,6 +218,18 @@ public partial class RuleManager : Node
         _bgm.Play();
     }
 
+    /// <summary>暂停 BGM（过场对话期间调用）。用 StreamPaused，恢复后从暂停处续播。</summary>
+    public void PauseBGM()
+    {
+        if (_bgm != null && _bgm.Playing) _bgm.StreamPaused = true;
+    }
+
+    /// <summary>恢复 BGM（过场对话结束调用）。</summary>
+    public void ResumeBGM()
+    {
+        if (_bgm != null && _bgm.Playing) _bgm.StreamPaused = false;
+    }
+
     /// <summary>在地图随机位置投放一个「技能宝珠」拾取物（捡起后获得技能点）。</summary>
     private void SpawnSkillDrop()
     {

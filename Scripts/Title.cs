@@ -12,6 +12,7 @@ public partial class Title : Control
 {
     private Control _rulesOverlay;   // 规则介绍弹窗根（遮罩+窗口），null = 未打开
     private Control _settingsOverlay; // 设置弹窗根，null = 未打开
+    private Control _cardPoolOverlay; // 卡牌池查看弹窗根，null = 未打开
     private Label _resLabel;         // 设置面板：当前分辨率
     private Label _volLabel;         // 设置面板：当前音量
     private Godot.Collections.Dictionary<string, Label> _bindLabels = new();  // action -> 当前按键 Label
@@ -296,6 +297,27 @@ public partial class Title : Control
         ctrl.Modulate = new Color(0.92f, 0.92f, 0.97f);
         vbox.AddChild(ctrl);
 
+        // 卡牌系统段落后：提供「查看现有卡牌池」入口
+        var sep2 = new ColorRect();
+        sep2.Color = new Color(0.5f, 0.4f, 0.6f, 0.5f);
+        sep2.Size = new Vector2(sc.Size.X - 4f, 1);
+        vbox.AddChild(sep2);
+
+        var poolBtn = new Button();
+        poolBtn.Text = "查看现有卡牌池";
+        poolBtn.CustomMinimumSize = new Vector2(240f, 40f);
+        poolBtn.SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter;
+        poolBtn.AddThemeFontSizeOverride("font_size", 16);
+        poolBtn.Alignment = HorizontalAlignment.Center;
+        poolBtn.FocusMode = Control.FocusModeEnum.None;
+        poolBtn.AddThemeStyleboxOverride("normal", MakeBtnStyle(false, false));
+        poolBtn.AddThemeStyleboxOverride("hover", MakeBtnStyle(true, false));
+        poolBtn.AddThemeStyleboxOverride("pressed", MakeBtnStyle(false, true));
+        poolBtn.AddThemeColorOverride("font_color", new Color(1f, 0.95f, 0.7f));
+        WireButtonSfx(poolBtn);
+        poolBtn.Pressed += OpenCardPool;
+        vbox.AddChild(poolBtn);
+
         AddChild(overlay);
         _rulesOverlay = overlay;
 
@@ -487,6 +509,115 @@ public partial class Title : Control
         tw.TweenCallback(Callable.From(() => ov.QueueFree()));
     }
 
+    // ---------- 卡牌池查看弹窗 ----------
+    private void OpenCardPool()
+    {
+        if (_cardPoolOverlay != null) return;
+
+        var overlay = new Control();
+        overlay.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+        overlay.MouseFilter = Control.MouseFilterEnum.Stop;
+
+        var dim = new ColorRect();
+        dim.Color = new Color(0f, 0f, 0f, 0.62f);
+        dim.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+        dim.MouseFilter = Control.MouseFilterEnum.Stop;
+        dim.GuiInput += (ev) =>
+        {
+            if (ev is InputEventMouseButton mb && mb.Pressed && mb.ButtonIndex == MouseButton.Left)
+                CloseCardPool();
+        };
+        overlay.AddChild(dim);
+
+        var win = new Panel();
+        win.CustomMinimumSize = new Vector2(700f, 500f);
+        win.AnchorLeft = win.AnchorRight = win.AnchorTop = win.AnchorBottom = 0.5f;
+        win.OffsetLeft = -350f; win.OffsetRight = 350f;
+        win.OffsetTop = -250f; win.OffsetBottom = 250f;
+        win.MouseFilter = Control.MouseFilterEnum.Stop;
+        var ws = new StyleBoxFlat();
+        ws.BgColor = new Color(0.09f, 0.07f, 0.15f, 0.98f);
+        ws.BorderColor = new Color(0.85f, 0.7f, 0.4f, 1f);
+        ws.BorderWidthLeft = ws.BorderWidthTop = ws.BorderWidthRight = ws.BorderWidthBottom = 3;
+        ws.CornerRadiusTopLeft = ws.CornerRadiusTopRight =
+            ws.CornerRadiusBottomLeft = ws.CornerRadiusBottomRight = 12;
+        ws.ContentMarginLeft = ws.ContentMarginRight = 18;
+        ws.ContentMarginTop = ws.ContentMarginBottom = 18;
+        win.AddThemeStyleboxOverride("panel", ws);
+        overlay.AddChild(win);
+
+        var wtitle = new Label();
+        wtitle.Text = "现有卡牌池";
+        wtitle.AddThemeFontSizeOverride("font_size", 24);
+        wtitle.Modulate = new Color(1f, 0.85f, 0.4f);
+        wtitle.Position = new Vector2(20f, 14f);
+        wtitle.Size = new Vector2(520f, 34f);
+        win.AddChild(wtitle);
+
+        var close = new Button();
+        close.Text = "关闭 ✕";
+        close.Position = new Vector2(win.Size.X - 112f, 14f);
+        close.Size = new Vector2(94f, 34f);
+        close.AddThemeFontSizeOverride("font_size", 16);
+        close.FocusMode = Control.FocusModeEnum.None;
+        close.AddThemeStyleboxOverride("normal", MakeBtnStyle(false, false));
+        close.AddThemeStyleboxOverride("hover", MakeBtnStyle(true, false));
+        close.AddThemeColorOverride("font_color", new Color(0.96f, 0.94f, 1f));
+        WireButtonSfx(close);
+        close.Pressed += CloseCardPool;
+        win.AddChild(close);
+
+        var sc = new ScrollContainer();
+        sc.Position = new Vector2(16f, 58f);
+        sc.Size = new Vector2(win.Size.X - 32f, win.Size.Y - 74f);
+        sc.HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled;
+        sc.VerticalScrollMode = ScrollContainer.ScrollMode.Auto;
+        sc.AddThemeStyleboxOverride("bg", new StyleBoxFlat());
+        win.AddChild(sc);
+
+        var col = new VBoxContainer();
+        col.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        col.AddThemeConstantOverride("separation", 10);
+        sc.AddChild(col);
+
+        foreach (var c in CardDefs.All)
+        {
+            var row = new VBoxContainer();
+            row.AddThemeConstantOverride("separation", 2);
+            var n = new Label();
+            n.Text = c.name;
+            n.AddThemeFontSizeOverride("font_size", 18);
+            n.HorizontalAlignment = HorizontalAlignment.Center;
+            n.Modulate = c.color;
+            var d = new Label();
+            d.Text = c.desc;
+            d.AddThemeFontSizeOverride("font_size", 14);
+            d.AutowrapMode = TextServer.AutowrapMode.Word;
+            d.HorizontalAlignment = HorizontalAlignment.Center;
+            d.CustomMinimumSize = new Vector2(620f, 30f);
+            d.Modulate = new Color(0.9f, 0.9f, 0.95f);
+            row.AddChild(n);
+            row.AddChild(d);
+            col.AddChild(row);
+        }
+
+        AddChild(overlay);
+        _cardPoolOverlay = overlay;
+        overlay.Modulate = new Color(1f, 1f, 1f, 0f);
+        var tw = CreateTween();
+        tw.TweenProperty(overlay, "modulate", new Color(1f, 1f, 1f, 1f), 0.18f);
+    }
+
+    private void CloseCardPool()
+    {
+        if (_cardPoolOverlay == null) return;
+        var ov = _cardPoolOverlay;
+        _cardPoolOverlay = null;
+        var tw = CreateTween();
+        tw.TweenProperty(ov, "modulate", new Color(1f, 1f, 1f, 0f), 0.15f);
+        tw.TweenCallback(Callable.From(() => ov.QueueFree()));
+    }
+
     // 设置面板里的一行（左侧标题 + 右侧控件由调用方追加）
     private HBoxContainer AddRow(VBoxContainer col, string caption)
     {
@@ -644,6 +775,11 @@ public partial class Title : Control
         }
         if (@event is not InputEventKey key2 || !key2.Pressed || key2.Echo) return;
         // 任一弹窗打开时：仅 Esc 关闭，屏蔽其它（避免误触开始游戏）
+        if (_cardPoolOverlay != null)
+        {
+            if (key2.Keycode == Key.Escape) CloseCardPool();
+            return;
+        }
         if (_rulesOverlay != null)
         {
             if (key2.Keycode == Key.Escape) CloseRules();

@@ -48,6 +48,7 @@ public partial class Player : CharacterBody2D
     private Sprite2D _shield3;   // 青色护盾（技能3）：3秒无敌，独立子节点避免与 modulate 闪烁冲突
     private float _shieldTimer;  // 青色护盾剩余无敌时间
     private bool _frozen;        // 投技窒息期间冻结输入/物理（非树暂停，滤镜动画照常）
+    private bool _deathCineInvuln; // BOSS 死亡慢动作演出期间：玩家仍可控，但免疫一切伤害（防违规掉血造成混乱）
 
     // 划除（Q）长按蓄力机制
     private bool _striking;          // 是否正在长按蓄力
@@ -705,7 +706,7 @@ public partial class Player : CharacterBody2D
 
     public void TakeDamage(int amount)
     {
-        if (_invuln > 0 || _hp <= 0) return;
+        if (_deathCineInvuln || _invuln > 0 || _hp <= 0) return;
         _hp -= amount;
         EmitSignal(SignalName.HealthChanged, _hp, MaxHp);
         if (_hp <= 0)
@@ -723,7 +724,7 @@ public partial class Player : CharacterBody2D
     /// 否则扣血并给短无敌帧（避免弹幕单帧叠伤）。</summary>
     public void TakeBossDamage(int amount)
     {
-        if (_hp <= 0) return;
+        if (_hp <= 0 || _deathCineInvuln) return;
         if (IsShieldActive()) { OnShieldBlock(); return; }   // 青色护盾：3 秒无敌，优先于一切 BOSS 伤害
         if (IsGuarding) { OnGuardBlock(); return; }   // 防御优先：无视无敌帧，按住 S 即生效
         if (_invuln > 0f) return;
@@ -783,6 +784,10 @@ public partial class Player : CharacterBody2D
     /// <summary>投技冻结：true 时 _PhysicsProcess 早退，暂停输入与物理（非树暂停，滤镜动画照常）。</summary>
     public void SetFrozen(bool f) => _frozen = f;
 
+    /// <summary>BOSS 死亡慢动作演出期间临时无敌：玩家仍可控（不冻结），但免疫一切伤害。
+    /// 演出结束后由 LevelDirector 调用置回 false。</summary>
+    public void SetDeathInvuln(bool v) => _deathCineInvuln = v;
+
     /// <summary>投技击飞：给一个强上抛速度（重力随后接管落回）。</summary>
     public void KnockUp(float vy = -760f) => Velocity = new Vector2(Velocity.X, vy);
 
@@ -790,7 +795,7 @@ public partial class Player : CharacterBody2D
     public void TakeGrab(int amount)
     {
         if (IsShieldActive()) { OnShieldBlock(); return; }
-        if (_hp <= 0) return;
+        if (_hp <= 0 || _deathCineInvuln) return;
         _hp -= amount;
         if (_hp <= 0)
         {

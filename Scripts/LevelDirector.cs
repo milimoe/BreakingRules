@@ -765,15 +765,20 @@ public partial class LevelDirector : Node2D
     /// <summary>第 1/2/3 关开战前的前置对话（背景 / 提醒 / 卡牌系统觉醒）；其余关返回 null。</summary>
     private System.Collections.Generic.List<(string, string)> GetPreDialogue(int stage)
     {
-        if (stage == 0)  // 第 1 关：背景介绍 + 主角目标
+        if (stage == 0)  // 第 1 关：背景介绍 + 主角目标 + 操作引导
+        {
+            string strikeKey = InputBindings.KeyLabel("strike");  // 划除键实际映射（默认 Q）
             return new System.Collections.Generic.List<(string, string)>
             {
                 ("旁白",  "「规则之塔」——一座由层层法条堆砌的牢笼。你被囚禁在最底层，无人记得你的罪名。"),
                 ("囚徒",  "他们说，规则就是秩序。可我的审判，从头到尾都不曾公正。"),
-                ("旁白",  "塔有九十九层，每层都有一位法官把守。初审官，是其中最微不足道的一个。"),
+                ("旁白",  "塔有九百九十九层，每层都有一位法官把守。初审官，是其中最微不足道的一个。"),
                 ("囚徒",  "但再微不足道，也是一道门。打破它，我便能向上。"),
+                ("囚徒",  $"注意法官布下的规则禁区，我不能在禁区里违反规则，而是要在禁区内长按【{strikeKey}】打破法官的规则，便能获得强大力量。"),
+                ("囚徒",  "另外，留意一下地图上出现的宝珠，不知道它们是从哪儿来的，但是一定对我有帮助……"),
                 ("旁白",  "……那么，开始你的第一次打破吧。"),
             };
+        }
         if (stage == 1)  // 第 2 关：BOSS 增强 + 规则可能遍布全图
             return new System.Collections.Generic.List<(string, string)>
             {

@@ -56,6 +56,8 @@ public partial class Player : CharacterBody2D
     private const float StrikeChargeTime = 1f;  // 长按约 1 秒完成
     private Node2D _strikeBar;       // 角色下方蓄力进度条容器
     private Sprite2D _strikeFill;    // 进度条填充（左对齐增长）
+    private Node2D _ultBar;          // 大招蓄力进度条容器（长按 E 时显示于角色下方）
+    private Sprite2D _ultFill;       // 进度条填充（黄色，左对齐增长）
     private bool _attacking;
     private int _hp;
     private float _invuln;
@@ -73,6 +75,7 @@ public partial class Player : CharacterBody2D
     private float _energy;           // 当前能量（满 EnergyMax 可释放大招）
     private int _selectedUlt;        // 当前选中的大招（0 乱刀斩 / 1 闪现斩 / 2 时间怀表）
     private float _eHeld;            // E 键长按计时（满 0.6s 释放）
+    private const float UltChargeTime = 0.6f;  // 大招长按释放所需时长（与进度条填充比例一致）
     private bool _ultFired;          // 本次长按是否已释放（防重复）
     private bool _fWasDown;          // F 键边沿检测
     private float _saltBuff;         // 伤口撒盐：违令扣血后 2s 内下次攻击 +50%
@@ -146,6 +149,19 @@ public partial class Player : CharacterBody2D
         _strikeBar.AddChild(_strikeFill);
         _strikeBar.Visible = false;
         AddChild(_strikeBar);
+        // 大招蓄力进度条（长按 E 时显示于角色下方，黄色，位于划除条之下）
+        _ultBar = new Node2D();
+        var ultBg = new Sprite2D();
+        ultBg.Texture = Util.Square(60, 8, new Color(0.15f, 0.15f, 0.15f, 0.85f));
+        ultBg.Position = new Vector2(0f, 46f);
+        _ultBar.AddChild(ultBg);
+        _ultFill = new Sprite2D();
+        _ultFill.Texture = Util.Square(60, 8, new Color(1f, 0.85f, 0.2f));   // 黄色
+        _ultFill.Centered = false;
+        _ultFill.Position = new Vector2(-30f, 42f);   // 左上角对齐 bg 左缘
+        _ultBar.AddChild(_ultFill);
+        _ultBar.Visible = false;
+        AddChild(_ultBar);
         _camera = GetNode<Camera2D>("Camera2D");
         Juice.Instance?.RegisterCamera(_camera);   // 把相机交给统一反馈中枢抖动
         // 单屏竞技场：把相机限位框设为整个 960x540 场地。
@@ -314,17 +330,26 @@ public partial class Player : CharacterBody2D
         if (Input.IsActionJustPressed("skill4")) TryCast(4, CastSkill4, ref _cd4, Cd4);
 
         // 大招：ult_switch 循环切换选中，长按 ult_release(0.6s) 释放当前选中（能量满时）
+        // 长按期间在角色下方显示黄色蓄力进度条（与 Q 划除条同款，仅颜色不同）。
         bool eDown = Input.IsActionPressed("ult_release");
-        if (eDown)
+        if (eDown && IsEnergyFull)
         {
+            if (_ultBar != null && !_ultBar.Visible) _ultBar.Visible = true;
+            if (_ultFill != null)
+                _ultFill.Scale = new Vector2(Mathf.Clamp(_eHeld / UltChargeTime, 0f, 1f), 1f);
             _eHeld += d;
-            if (_eHeld >= 0.6f && !_ultFired && IsEnergyFull)
+            if (_eHeld >= UltChargeTime && !_ultFired)
             {
                 ReleaseUltimate(_selectedUlt);
                 _ultFired = true;
             }
         }
-        else { _eHeld = 0f; _ultFired = false; }
+        else
+        {
+            if (_ultBar != null) _ultBar.Visible = false;
+            _eHeld = 0f;
+            _ultFired = false;
+        }
 
         bool fDown = Input.IsActionPressed("ult_switch");
         if (fDown && !_fWasDown)

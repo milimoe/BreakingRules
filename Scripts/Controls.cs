@@ -11,7 +11,7 @@ public partial class Controls : Panel
 {
     // 跨关卡 / 重开保留收起状态：场景重载会新建 Controls 实例，
     // 但 C# 静态字段在同一进程内不随场景重载重置，故用它持久化折叠偏好。
-    private static bool _savedExpanded = true;
+    private static bool _savedExpanded = false;  // 默认收起（进入第一关不弹操作明细，玩家按需点【展开】）
     private bool _expanded;
     private const float ExpandedBottom = 404f;   // 展开时面板下边（offset_bottom 值），容纳 12 行操作明细（含大招两行）
     private const float CollapsedBottom = 52f;    // 收起时仅留标题栏高度（含 content_margin，避免裁切标题）

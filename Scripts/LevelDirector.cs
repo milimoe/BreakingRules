@@ -38,7 +38,10 @@ public partial class LevelDirector : Node2D
     private bool _dlgTyping;                // 当前行是否正在打字
     private string _dlgFull;                // 当前行完整文本
     private int _dlgShown;                  // 已显示字符数
+    private float _dlgAcc;                  // 打字机小数累加器（避免 (int) 截断导致每帧 +0）
+    private float _dlgDwellLeft;            // 本行打完后停留倒计时（归零自动进入下一行）
     private const float DlgCps = 46f;      // 打字机速度（字符/秒）
+    private const float DlgDwell = 1.4f;    // 每行打完后停留秒数，随后自动推进下一行
 
     public override void _Ready()
     {
@@ -806,7 +809,8 @@ public partial class LevelDirector : Node2D
     }
 
     // ---------- 对话 UI 与流程 ----------
-    /// <summary>显示一段 AVG 对话：冻结全场 + 暂停 BGM，逐字打字机，点击 / 空格继续，Esc /【跳过】一键跳过。
+    /// <summary>显示一段 AVG 对话：冻结游戏（玩家/BOSS 不动）但音乐全程播放，逐字打字机并自动推进下一行，
+    /// 点击 / 空格可跳过当前行（立即补全并继续），Esc /【跳过】一键跳过整段。
     /// 全部行播完后调用 onDone（如开战前的卡牌浮层、或击败后的结算窗）。</summary>
     private void ShowDialogue(System.Collections.Generic.List<(string, string)> lines, System.Action onDone)
     {
@@ -869,7 +873,7 @@ public partial class LevelDirector : Node2D
         panel.AddChild(_dlgText);
 
         var hint = new Label();
-        hint.Text = "空格 / 点击 继续 · Esc 跳过";
+        hint.Text = "自动播放 · 点击/空格 跳过本行 · Esc 跳过全部";
         hint.Position = new Vector2(508f, 148f);
         hint.Size = new Vector2(248f, 20f);
         hint.AddThemeFontSizeOverride("font_size", 13);
@@ -901,8 +905,7 @@ public partial class LevelDirector : Node2D
         WireButtonSfx(skip);
         panel.AddChild(skip);
 
-        RuleManager.Instance?.PauseBGM();
-        GetTree().Paused = true;   // 冻结游戏（玩家/BOSS 不动）；对话结束后由 onDone 恢复/进入下一步
+        GetTree().Paused = true;   // 冻结游戏（玩家/BOSS 不动）；音乐仍由 RuleManager 全程播放；对话结束后由 onDone 恢复/进入下一步
         ShowLine(0);
     }
 
@@ -913,19 +916,25 @@ public partial class LevelDirector : Node2D
         _dlgSpeaker.Text = sp;
         _dlgFull = tx;
         _dlgShown = 0;
+        _dlgAcc = 0f;
+        _dlgDwellLeft = 0f;
         _dlgTyping = true;
         _dlgText.Text = "";
     }
 
-    /// <summary>推进对话：打字中则瞬间补全本行；否则进入下一行；末行后结束。</summary>
+    /// <summary>推进对话：打字中则瞬间补全本行并启动停留计时（随后自动进入下一行）；
+    /// 已显示完整（停留中）则立即进入下一行；末行后结束。</summary>
     private void AdvanceDialogue()
     {
         if (!_dlgActive) return;
         if (_dlgTyping)
         {
+            // 点击/空格：立即补全当前行，然后由停留计时自动推进
+            _dlgAcc = 0f;
             _dlgShown = _dlgFull.Length;
             _dlgText.Text = _dlgFull;
             _dlgTyping = false;
+            _dlgDwellLeft = DlgDwell;
             return;
         }
         _dlgIndex++;
@@ -933,13 +942,14 @@ public partial class LevelDirector : Node2D
         else ShowLine(_dlgIndex);
     }
 
-    /// <summary>结束对话（正常播完或中途跳过）：恢复 BGM 与树，清理浮层，触发 onDone。</summary>
+    /// <summary>结束对话（正常播完或中途跳过）：恢复游戏树，清理浮层，触发 onDone。音乐不受对话影响，全程播放。</summary>
     private void EndDialogue()
     {
         if (!_dlgActive) return;
         _dlgActive = false;
-        RuleManager.Instance?.ResumeBGM();
-        GetTree().Paused = false;
+        _dlgAcc = 0f;
+        _dlgDwellLeft = 0f;
+        GetTree().Paused = false;   // 仅恢复游戏，音乐继续由 RuleManager 播放
         var layer = _dlgLayer;
         _dlgLayer = null;
         layer?.QueueFree();
@@ -953,19 +963,38 @@ public partial class LevelDirector : Node2D
 
     public override void _Process(double delta)
     {
-        // 对话打字机：本节点 Always，暂停期间仍推进，逐字显示当前行。
-        if (_dlgActive && _dlgTyping)
+        // 对话驱动：本节点 ProcessMode=Always，树暂停时仍推进。
+        if (!_dlgActive) return;
+        if (_dlgTyping)
         {
-            _dlgShown += (int)(DlgCps * (float)delta);
-            if (_dlgShown >= _dlgFull.Length)
+            // 打字机：用小数累加器避免 (int) 截断导致每帧 +0（这正是此前「点击才能显示全文」的根因）。
+            _dlgAcc += DlgCps * (float)delta;
+            int add = (int)_dlgAcc;
+            if (add > 0)
             {
-                _dlgShown = _dlgFull.Length;
-                _dlgTyping = false;
-                _dlgText.Text = _dlgFull;
+                _dlgAcc -= add;
+                _dlgShown += add;
+                if (_dlgShown >= _dlgFull.Length)
+                {
+                    _dlgShown = _dlgFull.Length;
+                    _dlgText.Text = _dlgFull;
+                    _dlgTyping = false;
+                    _dlgDwellLeft = DlgDwell;   // 本行打完 → 停留后自动推进
+                }
+                else
+                {
+                    _dlgText.Text = _dlgFull.Substring(0, _dlgShown);
+                }
             }
-            else
+        }
+        else if (_dlgDwellLeft > 0f)
+        {
+            // 本行已完整显示：停留 DlgDwell 秒后自动进入下一行（或结束）。
+            _dlgDwellLeft -= (float)delta;
+            if (_dlgDwellLeft <= 0f)
             {
-                _dlgText.Text = _dlgFull.Substring(0, _dlgShown);
+                _dlgDwellLeft = 0f;
+                AdvanceDialogue();
             }
         }
     }

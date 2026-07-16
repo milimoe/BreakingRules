@@ -318,6 +318,14 @@ public partial class Title : Control
         poolBtn.Pressed += OpenCardPool;
         vbox.AddChild(poolBtn);
 
+        // 作者署名（规则介绍界面末尾）
+        var author = new Label();
+        author.Text = "作者：心音（Milimoe）";
+        author.AddThemeFontSizeOverride("font_size", 14);
+        author.Modulate = new Color(0.72f, 0.62f, 0.45f);
+        author.HorizontalAlignment = HorizontalAlignment.Center;
+        vbox.AddChild(author);
+
         AddChild(overlay);
         _rulesOverlay = overlay;
 

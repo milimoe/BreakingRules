@@ -159,12 +159,12 @@ public partial class Boss : CharacterBody2D
             {
                 // 全图规则：小概率专门的【左右反转】，否则基础规则升级为全图
                 if (GD.Randf() < 0.3f) mode = RuleMode.Invert;
-                else mode = RuleTypes[(int)GD.RandRange(0f, RuleTypes.Length - 1f)];
+                else mode = RuleTypes[(int)(GD.Randf() * RuleTypes.Length)];
                 isGlobal = true;
             }
             else
             {
-                mode = RuleTypes[(int)GD.RandRange(0f, RuleTypes.Length - 1f)];
+                mode = RuleTypes[(int)(GD.Randf() * RuleTypes.Length)];
                 if (canFollow && GD.Randf() < 0.35f) follow = true;
             }
             if (mode == RuleMode.Invert) isGlobal = true; // 左右反转本质即全图

@@ -276,19 +276,21 @@ public partial class Player : CharacterBody2D
             bool inNoAttack = !shield && RuleManager.Instance != null &&
                 RuleManager.Instance.ActiveRules.Any(r => IsInstanceValid(r) &&
                     r.Mode == RuleMode.NoAttack && r.Contains(GlobalPosition));
-            if (inNoAttack && !HasCard("salt"))
+            if (inNoAttack)
             {
-                // 禁武区违规：罚血 + 撒盐窗口（不持有「伤口撒盐」则禁止攻击）
+                // 禁武区违规：罚血 + 撒盐窗口（无论是否持盐都扣血；持盐额外允许照常攻击）
                 if (_invuln <= 0) TakeDamage(1);
                 _saltBuff = 2f;
                 ShowPopup("违规！", Colors.Red);
                 Shake();
                 Juice.Instance?.FlashEdge(Colors.Red, 0.3f);   // 违令而行：屏幕边缘刺痛红闪
                 RuleManager.Instance?.PlaySFX("violation");
+                if (HasCard("salt"))
+                    Swing();  // 持有「伤口撒盐」：触犯禁武仍执行当前攻击动作（但照常扣血）
             }
             else
             {
-                // 普通攻击，或持有「伤口撒盐」时在禁武区内照常攻击（行动不被阻止）
+                // 普通攻击（非禁武区）
                 Swing();
             }
         }

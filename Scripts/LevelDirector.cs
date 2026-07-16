@@ -39,9 +39,11 @@ public partial class LevelDirector : Node2D
     private string _dlgFull;                // 当前行完整文本
     private int _dlgShown;                  // 已显示字符数
     private float _dlgAcc;                  // 打字机小数累加器（避免 (int) 截断导致每帧 +0）
-    private float _dlgDwellLeft;            // 本行打完后停留倒计时（归零自动进入下一行）
+    private float _dlgDwellLeft;            // 本行打完后停留倒计时（自动模式下归零自动进入下一行）
+    private bool _dlgAuto;                  // 是否自动播放（默认 false = 手动，需点击继续）
+    private Button _dlgAutoBtn;             // 【自动】切换按钮
     private const float DlgCps = 46f;      // 打字机速度（字符/秒）
-    private const float DlgDwell = 1.4f;    // 每行打完后停留秒数，随后自动推进下一行
+    private const float DlgDwell = 2.5f;    // 自动模式下每行打完后停留秒数，随后自动推进下一行
 
     public override void _Ready()
     {
@@ -809,9 +811,9 @@ public partial class LevelDirector : Node2D
     }
 
     // ---------- 对话 UI 与流程 ----------
-    /// <summary>显示一段 AVG 对话：冻结游戏（玩家/BOSS 不动）但音乐全程播放，逐字打字机并自动推进下一行，
-    /// 点击 / 空格可跳过当前行（立即补全并继续），Esc /【跳过】一键跳过整段。
-    /// 全部行播完后调用 onDone（如开战前的卡牌浮层、或击败后的结算窗）。</summary>
+    /// <summary>显示一段 AVG 对话：冻结游戏（玩家/BOSS 不动）但音乐全程播放，逐字打字机；
+    /// 默认手动模式（打完一行停等点击/空格 继续），点【自动】切到自动（每行打完停留 2.5s 自动续播），
+    /// Esc /【跳过】一键跳过整段。全部行播完后调用 onDone（如开战前的卡牌浮层、或击败后的结算窗）。</summary>
     private void ShowDialogue(System.Collections.Generic.List<(string, string)> lines, System.Action onDone)
     {
         if (_dlgActive || lines == null || lines.Count == 0) { onDone?.Invoke(); return; }
@@ -819,6 +821,7 @@ public partial class LevelDirector : Node2D
         _dlgLines = lines;
         _dlgIndex = 0;
         _dlgOnDone = onDone;
+        _dlgAuto = false;          // 默认手动模式（需点击继续）
 
         _dlgLayer = new CanvasLayer();
         _dlgLayer.Layer = 40;   // 高于卡牌浮层(30)与胜负对话框(20)
@@ -840,7 +843,7 @@ public partial class LevelDirector : Node2D
         // 对话面板（底部 AVG 风格）。MouseFilter=Ignore，让非按钮点击穿透到 dim 触发继续。
         var panel = new Panel();
         panel.Position = new Vector2(90f, 350f);
-        panel.Size = new Vector2(780f, 178f);
+        panel.Size = new Vector2(780f, 190f);
         var ps = new StyleBoxFlat();
         ps.BgColor = new Color(0.06f, 0.05f, 0.13f, 0.98f);
         ps.BorderColor = new Color(0.85f, 0.7f, 0.4f, 1f);
@@ -864,7 +867,7 @@ public partial class LevelDirector : Node2D
 
         _dlgText = new Label();
         _dlgText.Position = new Vector2(24f, 54f);
-        _dlgText.Size = new Vector2(732f, 96f);
+        _dlgText.Size = new Vector2(732f, 88f);
         _dlgText.AddThemeFontSizeOverride("font_size", 17);
         _dlgText.AutowrapMode = TextServer.AutowrapMode.WordSmart;
         _dlgText.VerticalAlignment = VerticalAlignment.Top;
@@ -873,9 +876,9 @@ public partial class LevelDirector : Node2D
         panel.AddChild(_dlgText);
 
         var hint = new Label();
-        hint.Text = "自动播放 · 点击/空格 跳过本行 · Esc 跳过全部";
-        hint.Position = new Vector2(508f, 148f);
-        hint.Size = new Vector2(248f, 20f);
+        hint.Text = "点击/空格 继续 · Esc 跳过全部";
+        hint.Position = new Vector2(140f, 162f);
+        hint.Size = new Vector2(620f, 22f);
         hint.AddThemeFontSizeOverride("font_size", 13);
         hint.HorizontalAlignment = HorizontalAlignment.Right;
         hint.Modulate = new Color(0.6f, 0.56f, 0.72f);
@@ -905,6 +908,30 @@ public partial class LevelDirector : Node2D
         WireButtonSfx(skip);
         panel.AddChild(skip);
 
+        // 【自动】按钮：切换自动播放（默认关；开时每行打完停留 2.5s 自动续播）
+        var auto = new Button();
+        auto.Text = "自动 关";
+        auto.Position = new Vector2(24f, 156f);
+        auto.Size = new Vector2(100f, 30f);
+        auto.AddThemeFontSizeOverride("font_size", 15);
+        auto.Alignment = HorizontalAlignment.Center;
+        auto.ProcessMode = Node.ProcessModeEnum.Always;
+        auto.FocusMode = Control.FocusModeEnum.None;
+        auto.AddThemeStyleboxOverride("normal", new StyleBoxFlat
+        {
+            BgColor = new Color(0.18f, 0.20f, 0.26f, 0.95f),
+            BorderColor = new Color(0.5f, 0.55f, 0.65f, 1f),
+            BorderWidthLeft = 2,
+            BorderWidthTop = 2,
+            BorderWidthRight = 2,
+            BorderWidthBottom = 2,
+        });
+        auto.AddThemeColorOverride("font_color", new Color(0.7f, 0.72f, 0.8f));
+        auto.Pressed += ToggleAuto;
+        WireButtonSfx(auto);
+        panel.AddChild(auto);
+        _dlgAutoBtn = auto;
+
         GetTree().Paused = true;   // 冻结游戏（玩家/BOSS 不动）；音乐仍由 RuleManager 全程播放；对话结束后由 onDone 恢复/进入下一步
         ShowLine(0);
     }
@@ -929,12 +956,12 @@ public partial class LevelDirector : Node2D
         if (!_dlgActive) return;
         if (_dlgTyping)
         {
-            // 点击/空格：立即补全当前行，然后由停留计时自动推进
+            // 点击/空格：立即补全当前行；自动模式下启动停留计时续播，手动模式停等用户再次点击
             _dlgAcc = 0f;
             _dlgShown = _dlgFull.Length;
             _dlgText.Text = _dlgFull;
             _dlgTyping = false;
-            _dlgDwellLeft = DlgDwell;
+            _dlgDwellLeft = _dlgAuto ? DlgDwell : 0f;
             return;
         }
         _dlgIndex++;
@@ -949,6 +976,7 @@ public partial class LevelDirector : Node2D
         _dlgActive = false;
         _dlgAcc = 0f;
         _dlgDwellLeft = 0f;
+        _dlgAutoBtn = null;
         GetTree().Paused = false;   // 仅恢复游戏，音乐继续由 RuleManager 播放
         var layer = _dlgLayer;
         _dlgLayer = null;
@@ -960,6 +988,27 @@ public partial class LevelDirector : Node2D
 
     /// <summary>一键跳过：直接结束整段对话。</summary>
     private void SkipDialogue() => EndDialogue();
+
+    /// <summary>切换自动播放：开=每行打完停留 DlgDwell(2.5s) 自动续播；关=停等用户点击/空格。
+    /// 若当前行已打完且正在等待，开则立即启动停留计时，关则取消。</summary>
+    private void ToggleAuto()
+    {
+        if (!_dlgActive) return;
+        _dlgAuto = !_dlgAuto;
+        if (_dlgAutoBtn != null)
+        {
+            _dlgAutoBtn.Text = _dlgAuto ? "自动 开" : "自动 关";
+            _dlgAutoBtn.Modulate = _dlgAuto ? new Color(1f, 0.92f, 0.55f) : new Color(1f, 1f, 1f);
+        }
+        if (_dlgAuto)
+        {
+            if (!_dlgTyping && _dlgDwellLeft <= 0f) _dlgDwellLeft = DlgDwell;  // 当前行已显示完，立即开始自动停留
+        }
+        else
+        {
+            _dlgDwellLeft = 0f;  // 关闭自动：取消进行中的停留计时
+        }
+    }
 
     public override void _Process(double delta)
     {
@@ -979,7 +1028,7 @@ public partial class LevelDirector : Node2D
                     _dlgShown = _dlgFull.Length;
                     _dlgText.Text = _dlgFull;
                     _dlgTyping = false;
-                    _dlgDwellLeft = DlgDwell;   // 本行打完 → 停留后自动推进
+                    _dlgDwellLeft = _dlgAuto ? DlgDwell : 0f;   // 自动模式才停留续播；手动模式停等用户点击
                 }
                 else
                 {

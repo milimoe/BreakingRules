@@ -194,11 +194,12 @@ public partial class Hud : Control
             slot.AddChild(key);
 
             var cd = new Label();
-            cd.AddThemeFontSizeOverride("font_size", 14);
-            cd.HorizontalAlignment = HorizontalAlignment.Right;
-            cd.Position = new Vector2(20f, 28f);
-            cd.Size = new Vector2(24f, 18f);
-            cd.Modulate = new Color(1f, 0.25f, 0.25f); // 红色 CD 数字
+            cd.AddThemeFontSizeOverride("font_size", 18);
+            cd.HorizontalAlignment = HorizontalAlignment.Center;
+            cd.VerticalAlignment = VerticalAlignment.Center;
+            cd.Position = new Vector2(0f, 0f);
+            cd.Size = new Vector2(46f, 46f);
+            cd.Modulate = Colors.White;   // 与大招 CD 同款：居中白色数字，覆盖整格
             cd.Visible = false;
             slot.AddChild(cd);
 
@@ -228,9 +229,9 @@ public partial class Hud : Control
         _energyBar.AddThemeStyleboxOverride("fill", efg);
         AddChild(_energyBar);
 
-        // 「大招」小标题：位于能量条右侧、大招图标上方，提示该组图标的用途
+        // 「大招」小标题：位于能量条右侧、大招图标上方，提示该组图标的用途与切换键
         var ultHeader = new Label();
-        ultHeader.Text = "大招";
+        ultHeader.Text = "大招 - 按" + InputBindings.KeyLabel("ult_switch") + "切换";
         ultHeader.Position = new Vector2(280f, 88f);
         ultHeader.AddThemeFontSizeOverride("font_size", 13);
         ultHeader.Modulate = Colors.Gold;
@@ -259,21 +260,13 @@ public partial class Hud : Control
             _ultIcons[i] = icon;
 
             var key = new Label();
-            key.Text = InputBindings.KeyLabel("ult_switch");
+            key.Text = InputBindings.KeyLabel("ult_release");  // 左下角：长按释放键（E / 实际改键映射）
             key.AddThemeFontSizeOverride("font_size", 12);
             key.Position = new Vector2(2f, 30f);
             key.Modulate = Colors.Gold;
             frame.AddChild(key);
 
-            // 长按 ult_release 释放提示（与「ult_switch 切换选中」并列，避免玩家不知道按什么释放）
-            var keyE = new Label();
-            keyE.Text = InputBindings.KeyLabel("ult_release");
-            keyE.AddThemeFontSizeOverride("font_size", 12);
-            keyE.HorizontalAlignment = HorizontalAlignment.Right;
-            keyE.Position = new Vector2(0f, 30f);
-            keyE.Size = new Vector2(42f, 18f);
-            keyE.Modulate = Colors.Gold;
-            frame.AddChild(keyE);
+            // 右下角不再显示切换键（切换提示已上移到「大招 - 按X切换」标题）
 
             var cd = new Label();
             cd.AddThemeFontSizeOverride("font_size", 18);

@@ -15,11 +15,15 @@ public partial class Title : Control
     private Control _cardPoolOverlay; // 卡牌池查看弹窗根，null = 未打开
     private Label _resLabel;         // 设置面板：当前分辨率
     private Label _volLabel;         // 设置面板：当前音量
-    private Godot.Collections.Dictionary<string, Label> _bindLabels = new();  // action -> 当前按键 Label
-    private Godot.Collections.Dictionary<string, Button> _cancelButtons = new();  // action -> 听键时的【取消】按钮
-    private bool _listening = false;  // 是否处于「听键」状态
-    private string _listeningAction;  // 正在重绑的 action
-    private Button _listeningBtn;     // 正在闪烁的「重新绑定」按钮
+    private Godot.Collections.Dictionary<string, Label> _primLabels = new();   // action -> 主键 Label
+    private Godot.Collections.Dictionary<string, Label> _secLabels = new();    // action -> 次键 Label
+    private Godot.Collections.Dictionary<string, Button> _clearPrimBtns = new();  // action -> 主键【✕】解绑
+    private Godot.Collections.Dictionary<string, Button> _clearSecBtns = new();   // action -> 次键【✕】解绑
+    private Button _cancelListenBtn;   // 听键中出现的【取消】按钮
+    private bool _listening = false;   // 是否处于「听键」状态
+    private string _listeningAction;   // 正在重绑的 action
+    private int _listeningSlot;        // 0=主键 / 1=次键
+    private Button _listeningBtn;      // 正在闪烁的「修改」按钮
 
     public override void _Ready()
     {
@@ -320,7 +324,7 @@ public partial class Title : Control
 
         // 作者署名（规则介绍界面末尾）
         var author = new Label();
-        author.Text = "作者：心音（Milimoe）";
+        author.Text = "作者：心音";
         author.AddThemeFontSizeOverride("font_size", 14);
         author.Modulate = new Color(0.72f, 0.62f, 0.45f);
         author.HorizontalAlignment = HorizontalAlignment.Center;
@@ -444,7 +448,7 @@ public partial class Title : Control
         volRow.AddChild(_volLabel);
         volRow.AddChild(MakeButton("＋", Vector2.Zero, 46f, 40f, () => StepVolume(1)));
 
-        // 分隔标题行：标题 + 恢复默认按钮
+        // 操作按键：两列（主键 / 次键）独立改键。标题行含【恢复默认】与听键时的【取消】。
         var rebindHeader = new HBoxContainer();
         rebindHeader.AddThemeConstantOverride("separation", 8);
         var sepCap = new Label();
@@ -454,46 +458,79 @@ public partial class Title : Control
         sepCap.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
         rebindHeader.AddChild(sepCap);
         rebindHeader.AddChild(MakeButton("恢复默认", Vector2.Zero, 110f, 34f, ResetBindings));
+        _cancelListenBtn = MakeButton("取消", Vector2.Zero, 90f, 34f, CancelRebind);
+        _cancelListenBtn.Visible = false;   // 仅听键中出现
+        rebindHeader.AddChild(_cancelListenBtn);
         col.AddChild(rebindHeader);
 
-        // 改键行（每行：动作名 + 当前键 + 重新绑定按钮 + 听键时出现的【取消】按钮）
+        // 列标题：动作 / 主键 / 次键（与下方每行对齐）
+        var colHead = new HBoxContainer();
+        colHead.AddThemeConstantOverride("separation", 6);
+        colHead.AddChild(MakeHeadLabel("动作", 118f));
+        colHead.AddChild(MakeHeadLabel("主键", 162f));
+        colHead.AddChild(MakeHeadLabel("次键", 162f));
+        col.AddChild(colHead);
+
+        // 改键行：动作名 + [主键标签 + 修改按钮] + [次键标签 + 修改按钮] + 各槽【✕】解绑
         foreach (var (disp, act) in InputBindings.Rebindable)
         {
             var row = new HBoxContainer();
-            row.AddThemeConstantOverride("separation", 8);
+            row.AddThemeConstantOverride("separation", 6);
+
             var name = new Label();
             name.Text = disp;
-            name.AddThemeFontSizeOverride("font_size", 16);
+            name.AddThemeFontSizeOverride("font_size", 15);
             name.Modulate = new Color(0.9f, 0.9f, 0.96f);
-            name.CustomMinimumSize = new Vector2(130f, 36f);
+            name.CustomMinimumSize = new Vector2(118f, 36f);
             name.SizeFlagsVertical = Control.SizeFlags.ShrinkCenter;
             row.AddChild(name);
 
-            var cur = new Label();
-            cur.Text = InputBindings.KeyLabel(act);
-            cur.AddThemeFontSizeOverride("font_size", 16);
-            cur.HorizontalAlignment = HorizontalAlignment.Center;
-            cur.Modulate = new Color(1f, 0.9f, 0.5f);
-            cur.CustomMinimumSize = new Vector2(140f, 36f);
-            cur.SizeFlagsVertical = Control.SizeFlags.ShrinkCenter;
-            row.AddChild(cur);
-            _bindLabels[act] = cur;
+            // 主键列
+            var primLabel = new Label();
+            primLabel.Text = InputBindings.KeyLabelPrimary(act);
+            primLabel.AddThemeFontSizeOverride("font_size", 15);
+            primLabel.HorizontalAlignment = HorizontalAlignment.Center;
+            primLabel.Modulate = new Color(1f, 0.9f, 0.5f);
+            primLabel.CustomMinimumSize = new Vector2(96f, 36f);
+            primLabel.SizeFlagsVertical = Control.SizeFlags.ShrinkCenter;
+            row.AddChild(primLabel);
+            _primLabels[act] = primLabel;
 
-            var btn = MakeButton("重新绑定", Vector2.Zero, 120f, 36f, () => { });
-            btn.Pressed += () => BeginRebind(act, btn);
-            row.AddChild(btn);
+            var primBtn = MakeButton("修改", Vector2.Zero, 60f, 36f, () => { });
+            primBtn.Pressed += () => BeginRebind(act, 0, primBtn);
+            row.AddChild(primBtn);
 
-            var cancelBtn = MakeButton("取消", Vector2.Zero, 70f, 36f, () => { });
-            cancelBtn.Visible = false;   // 仅在听键中出现，避免常驻占用空间
-            cancelBtn.Pressed += CancelRebind;
-            row.AddChild(cancelBtn);
-            _cancelButtons[act] = cancelBtn;
+            // 次键列
+            var secLabel = new Label();
+            secLabel.Text = InputBindings.KeyLabelSecondary(act);
+            secLabel.AddThemeFontSizeOverride("font_size", 15);
+            secLabel.HorizontalAlignment = HorizontalAlignment.Center;
+            secLabel.Modulate = new Color(1f, 0.9f, 0.5f);
+            secLabel.CustomMinimumSize = new Vector2(96f, 36f);
+            secLabel.SizeFlagsVertical = Control.SizeFlags.ShrinkCenter;
+            row.AddChild(secLabel);
+            _secLabels[act] = secLabel;
+
+            var secBtn = MakeButton("修改", Vector2.Zero, 60f, 36f, () => { });
+            secBtn.Pressed += () => BeginRebind(act, 1, secBtn);
+            row.AddChild(secBtn);
+
+            // 各槽解绑（仅在该槽有绑定时显示）
+            var clearPrim = MakeButton("✕", Vector2.Zero, 26f, 36f, () => ClearSlot(act, 0));
+            clearPrim.Visible = InputBindings.KeyLabelPrimary(act) != "—";
+            row.AddChild(clearPrim);
+            _clearPrimBtns[act] = clearPrim;
+
+            var clearSec = MakeButton("✕", Vector2.Zero, 26f, 36f, () => ClearSlot(act, 1));
+            clearSec.Visible = InputBindings.KeyLabelSecondary(act) != "—";
+            row.AddChild(clearSec);
+            _clearSecBtns[act] = clearSec;
 
             col.AddChild(row);
         }
 
         var hint = new Label();
-        hint.Text = "分辨率 / 音量 / 按键实时生效并自动保存 · 点「重新绑定」后按任意键（【取消】或 Esc 取消）· 【恢复默认】还原全部按键 · Esc 关闭";
+        hint.Text = "分辨率 / 音量 / 按键实时生效并自动保存 · 点「修改」后按键盘或鼠标（左/右键、中键、滚轮、侧键）· 听键中按 Esc 或点【取消】放弃 · 【✕】解绑该槽 · 【恢复默认】还原 · Esc 关闭设置";
         hint.AddThemeFontSizeOverride("font_size", 13);
         hint.Modulate = new Color(0.6f, 0.56f, 0.72f);
         hint.AutowrapMode = TextServer.AutowrapMode.Word;
@@ -642,32 +679,59 @@ public partial class Title : Control
         return row;
     }
 
-    // 进入「听键」状态：按钮变提示，等待下一次按键
-    private void BeginRebind(string action, Button btn)
+    // 改键区列标题（居中标，与下方每行的列宽对齐）
+    private Label MakeHeadLabel(string text, float w)
+    {
+        var l = new Label();
+        l.Text = text;
+        l.AddThemeFontSizeOverride("font_size", 14);
+        l.HorizontalAlignment = HorizontalAlignment.Center;
+        l.Modulate = new Color(0.85f, 0.78f, 0.55f);
+        l.CustomMinimumSize = new Vector2(w, 30f);
+        l.SizeFlagsVertical = Control.SizeFlags.ShrinkCenter;
+        return l;
+    }
+
+    // 进入「听键」状态：按钮变提示，等待下一次键盘或鼠标输入（slot 0=主键 / 1=次键）
+    private void BeginRebind(string action, int slot, Button btn)
     {
         if (_listening) return;
         _listening = true;
         _listeningAction = action;
+        _listeningSlot = slot;
         _listeningBtn = btn;
         btn.Text = "按任意键…";
         btn.Modulate = new Color(1f, 0.6f, 0.3f);
-        if (_cancelButtons.TryGetValue(action, out var cb)) cb.Visible = true;
+        if (_cancelListenBtn != null) _cancelListenBtn.Visible = true;
     }
 
-    // 取消当前听键（不改动绑定），恢复按钮与【取消】按钮状态。
-    private void CancelRebind()
+    // 听键结束：恢复按钮与【取消】按钮状态
+    private void FinishRebind()
     {
-        if (!_listening) return;
         _listening = false;
         if (_listeningBtn != null)
         {
-            _listeningBtn.Text = "重新绑定";
+            _listeningBtn.Text = "修改";
             _listeningBtn.Modulate = Colors.White;
         }
-        if (_listeningAction != null && _cancelButtons.TryGetValue(_listeningAction, out var cb))
-            cb.Visible = false;
+        if (_cancelListenBtn != null) _cancelListenBtn.Visible = false;
         _listeningAction = null;
         _listeningBtn = null;
+    }
+
+    // 取消当前听键（不改动绑定）
+    private void CancelRebind()
+    {
+        if (!_listening) return;
+        FinishRebind();
+    }
+
+    // 解绑某槽（不进入听键，直接清空并保存）
+    private void ClearSlot(string action, int slot)
+    {
+        if (_listening) return;
+        InputBindings.RebindSlot(action, slot, null);
+        RefreshBindLabels();
     }
 
     // 恢复全部按键到默认，并刷新面板显示。
@@ -677,11 +741,16 @@ public partial class Title : Control
         RefreshBindLabels();
     }
 
-    // 刷新所有「当前按键」Label 为最新绑定。
+    // 刷新所有主键/次键 Label 与【✕】可见性为最新绑定。
     private void RefreshBindLabels()
     {
-        foreach (var kv in _bindLabels)
-            kv.Value.Text = InputBindings.KeyLabel(kv.Key);
+        foreach (var (_, act) in InputBindings.Rebindable)
+        {
+            if (_primLabels.TryGetValue(act, out var pl)) pl.Text = InputBindings.KeyLabelPrimary(act);
+            if (_secLabels.TryGetValue(act, out var sl)) sl.Text = InputBindings.KeyLabelSecondary(act);
+            if (_clearPrimBtns.TryGetValue(act, out var cp)) cp.Visible = InputBindings.KeyLabelPrimary(act) != "—";
+            if (_clearSecBtns.TryGetValue(act, out var cs)) cs.Visible = InputBindings.KeyLabelSecondary(act) != "—";
+        }
     }
 
     private void CycleResolution(int dir)
@@ -751,36 +820,35 @@ public partial class Title : Control
 
     private void QuitGame() => GetTree().Quit();
 
+    // 听键中捕获输入：在 GUI 之前拿到全部事件，故可捕获鼠标键（含滚轮/侧键）。
+    // 悬停在按钮（如【取消】）上时不捕获，交给 GUI 正常点击，保证取消可用。
+    public override void _Input(InputEvent @event)
+    {
+        if (!_listening) return;
+        InputBindings.Binding? b = null;
+        if (@event is InputEventKey key && key.Pressed && !key.Echo)
+        {
+            if (key.Keycode == Key.Escape) { CancelRebind(); GetViewport().SetInputAsHandled(); return; }
+            b = new InputBindings.Binding(InputBindings.Binding.Kind.Key, (int)key.PhysicalKeycode);
+        }
+        else if (@event is InputEventMouseButton mb && mb.Pressed && mb.ButtonIndex != MouseButton.None)
+        {
+            var hovered = GetViewport().GuiGetHoveredControl();
+            if (hovered is Button) return;   // 悬停在按钮上：交给 GUI（如【取消】），不捕获
+            b = new InputBindings.Binding(InputBindings.Binding.Kind.Mouse, (int)mb.ButtonIndex);
+        }
+        if (b.HasValue)
+        {
+            InputBindings.RebindSlot(_listeningAction, _listeningSlot, b.Value);
+            RefreshBindLabels();
+            FinishRebind();
+            GetViewport().SetInputAsHandled();
+        }
+    }
+
     public override void _UnhandledInput(InputEvent @event)
     {
-        // 听键中：捕获下一个按键，重绑并持久化，消费事件避免误触暂停/关闭
-        if (_listening && @event is InputEventKey key && key.Pressed && !key.Echo)
-        {
-            // Esc 视为取消本次重绑，避免把 Esc 本身绑成动作键
-            if (key.Keycode == Key.Escape)
-            {
-                CancelRebind();
-                GetViewport().SetInputAsHandled();
-                return;
-            }
-            int code = (int)key.PhysicalKeycode;
-            InputBindings.ApplyAction(_listeningAction, code);
-            InputBindings.SaveBinding(_listeningAction, code);
-            if (_bindLabels.TryGetValue(_listeningAction, out var lbl))
-                lbl.Text = InputBindings.KeyLabel(_listeningAction);
-            if (_listeningBtn != null)
-            {
-                _listeningBtn.Text = "重新绑定";
-                _listeningBtn.Modulate = Colors.White;
-            }
-            if (_listeningAction != null && _cancelButtons.TryGetValue(_listeningAction, out var cb))
-                cb.Visible = false;
-            _listening = false;
-            _listeningAction = null;
-            _listeningBtn = null;
-            GetViewport().SetInputAsHandled();
-            return;
-        }
+        // 听键捕获已挪到 _Input（可捕获鼠标键）。此处仅处理非听键时的键盘导航。
         if (@event is not InputEventKey key2 || !key2.Pressed || key2.Echo) return;
         // 任一弹窗打开时：仅 Esc 关闭，屏蔽其它（避免误触开始游戏）
         if (_cardPoolOverlay != null)
